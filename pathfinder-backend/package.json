@@ -1,0 +1,42 @@
+{
+  "name": "pathfinder-backend",
+  "version": "1.0.0",
+  "description": "Backend API for BGI Pathfinder Android app — Node.js + Express + MongoDB with spatial queries",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "seed": "node scripts/importOSM.js",
+    "master-import": "node scripts/masterImport.js",
+    "docker:build": "docker build -t pathfinder-backend .",
+    "docker:run": "docker run -p 3000:3000 --env-file .env pathfinder-backend"
+  },
+  "dependencies": {
+    "compression": "^1.7.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "mongoose": "^8.9.5",
+    "morgan": "^1.10.0",
+    "osm-pbf-parser": "^1.1.1",
+    "osm-read": "^0.7.0",
+    "protobufjs": "^7.4.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "pathfinder",
+    "osm",
+    "mongodb",
+    "geospatial",
+    "a-star"
+  ],
+  "author": "BGI",
+  "license": "MIT"
+}

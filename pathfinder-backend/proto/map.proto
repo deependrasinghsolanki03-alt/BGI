@@ -1,0 +1,85 @@
+// ─────────────────────────────────────────────────────
+// pathfinder-backend/proto/map.proto
+// Protocol Buffers schema for streaming map graph data
+// ─────────────────────────────────────────────────────
+//
+// Compile for Android (Kotlin):
+//   protoc --java_out=app/src/main/java proto/map.proto
+//
+// This schema defines the binary format for Node, Edge,
+// and MapGraph messages. ~60-80% smaller than JSON.
+// ─────────────────────────────────────────────────────
+
+syntax = "proto3";
+
+package pathfinder;
+
+option java_package = "com.bgi.pathfinder.proto";
+option java_outer_classname = "MapProto";
+
+// ═══════════════════════════════════════════════════
+// Node — a point on the road network (intersection)
+// ═══════════════════════════════════════════════════
+message Node {
+  string id = 1;            // OSM node ID
+  double lat = 2;           // Latitude
+  double lng = 3;           // Longitude
+  string name = 4;          // Optional road/place name
+}
+
+// ═══════════════════════════════════════════════════
+// Edge — a road segment connecting two nodes
+// ═══════════════════════════════════════════════════
+message Edge {
+  string id = 1;                    // Unique edge ID
+  string start_node = 2;           // Source node ID
+  string end_node = 3;             // Target node ID
+  double distance = 4;             // Length in meters (Haversine)
+  double traffic_multiplier = 5;   // Cost factor for traffic (1.0 = normal)
+  double quality_multiplier = 6;   // Cost factor for road quality (1.0 = normal)
+  bool is_one_way = 7;             // One-way street flag
+  string road_type = 8;            // OSM highway tag (primary, residential, etc.)
+  double speed_kmh = 9;            // Average speed on this segment
+  repeated LatLng geometry = 10;   // Polyline geometry for rendering
+}
+
+// ═══════════════════════════════════════════════════
+// LatLng — lightweight coordinate pair for geometry
+// ═══════════════════════════════════════════════════
+message LatLng {
+  double lat = 1;
+  double lng = 2;
+}
+
+// ═══════════════════════════════════════════════════
+// BoundingBox — the area covered by this graph
+// ═══════════════════════════════════════════════════
+message BoundingBox {
+  double south = 1;
+  double west = 2;
+  double north = 3;
+  double east = 4;
+  double padding_km = 5;
+}
+
+// ═══════════════════════════════════════════════════
+// MapGraph — the complete subgraph response
+// This is the top-level message streamed to the client
+// ═══════════════════════════════════════════════════
+message MapGraph {
+  repeated Node nodes = 1;
+  repeated Edge edges = 2;
+  BoundingBox bbox = 3;
+  GraphStats stats = 4;
+}
+
+// ═══════════════════════════════════════════════════
+// GraphStats — metadata about the response
+// ═══════════════════════════════════════════════════
+message GraphStats {
+  int32 node_count = 1;
+  int32 edge_count = 2;
+  double bbox_area_km2 = 3;
+  int64 query_time_ms = 4;
+  string format = 5;            // "protobuf" or "json"
+}

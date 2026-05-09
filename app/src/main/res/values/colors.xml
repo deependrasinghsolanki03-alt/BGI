@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary Dark Theme -->
+    <color name="primary">#3F51B5</color>
+    <color name="primary_dark">#1A1A2E</color>
+    <color name="accent">#7C4DFF</color>
+
+    <!-- Route Colors -->
+    <color name="route_standard">#42A5F5</color>
+    <color name="route_weighted">#EF5350</color>
+
+    <!-- UI Colors -->
+    <color name="background_dark">#1A1A2E</color>
+    <color name="card_dark">#161625</color>
+    <color name="text_primary">#E0E0FF</color>
+    <color name="text_secondary">#9999BB</color>
+
+    <!-- Node Marker Colors -->
+    <color name="node_default">#78909C</color>
+    <color name="node_start">#4CAF50</color>
+    <color name="node_end">#F44336</color>
+</resources>
