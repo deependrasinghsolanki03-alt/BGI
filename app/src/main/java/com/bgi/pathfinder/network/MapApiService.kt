@@ -21,12 +21,16 @@ interface MapApiService {
 
     /**
      * Search places in local MongoDB (OsmNode + OsmWay).
-     * GET /api/map/search?q=Red+Fort&limit=5
+     * GET /api/map/search?q=Red+Fort&limit=10&lat=28.6&lng=77.2
+     *
+     * When lat/lng are provided, results are sorted by proximity.
      */
     @GET("api/map/search")
     suspend fun searchPlaces(
         @Query("q") query: String,
-        @Query("limit") limit: Int = 10
+        @Query("limit") limit: Int = 10,
+        @Query("lat") lat: Double? = null,
+        @Query("lng") lng: Double? = null
     ): Response<ResponseBody>
 
     /**

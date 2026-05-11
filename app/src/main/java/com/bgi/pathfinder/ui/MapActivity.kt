@@ -374,8 +374,9 @@ class MapActivity : AppCompatActivity() {
         etStartSearch.addTextChangedListener(createSearchWatcher { query ->
             startSearchJob?.cancel()
             startSearchJob = lifecycleScope.launch {
-                delay(500) // debounce
-                val results = LocalSearchService.search(query)
+                delay(300) // 300ms debounce — fast yet prevents keystroke flooding
+                val loc = getUserLocation()
+                val results = LocalSearchService.search(query, loc?.first, loc?.second)
                 if (results.isNotEmpty()) {
                     startAdapter.updateResults(results)
                     rvStartResults.visibility = View.VISIBLE
@@ -401,8 +402,9 @@ class MapActivity : AppCompatActivity() {
         etEndSearch.addTextChangedListener(createSearchWatcher { query ->
             endSearchJob?.cancel()
             endSearchJob = lifecycleScope.launch {
-                delay(500)
-                val results = LocalSearchService.search(query)
+                delay(300) // 300ms debounce
+                val loc = getUserLocation()
+                val results = LocalSearchService.search(query, loc?.first, loc?.second)
                 if (results.isNotEmpty()) {
                     endAdapter.updateResults(results)
                     rvEndResults.visibility = View.VISIBLE
@@ -411,6 +413,15 @@ class MapActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    /**
+     * Get current user GPS location for proximity-based search.
+     * Returns (lat, lng) pair or null if GPS not available.
+     */
+    private fun getUserLocation(): Pair<Double, Double>? {
+        val loc = locationOverlay?.myLocation ?: return null
+        return Pair(loc.latitude, loc.longitude)
     }
 
     private fun createSearchWatcher(onQuery: (String) -> Unit): TextWatcher {
