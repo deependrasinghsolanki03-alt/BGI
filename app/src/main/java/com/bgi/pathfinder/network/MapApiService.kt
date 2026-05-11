@@ -74,6 +74,35 @@ interface MapApiService {
     ): Response<ResponseBody>
 
     // ═══════════════════════════════════════════════
+    // BBOX STREAMING — For Hybrid Map Overlay
+    // ═══════════════════════════════════════════════
+
+    /**
+     * Fetch road network for a visible map viewport (bounding box).
+     * Used by HybridMapOverlay for live vector rendering.
+     * Backend applies LOD filtering based on bbox diagonal.
+     */
+    @GET("api/map/subgraph-bbox")
+    suspend fun getSubgraphByBbox(
+        @Query("south") south: Double,
+        @Query("west") west: Double,
+        @Query("north") north: Double,
+        @Query("east") east: Double
+    ): Response<ResponseBody>
+
+    /**
+     * Stream road network as Protobuf for a viewport.
+     * Uses the stream-map endpoint with viewport corners as start/end.
+     */
+    @GET("api/v1/stream-map")
+    suspend fun streamMapBBox(
+        @Query("startLat") startLat: Double,
+        @Query("startLng") startLng: Double,
+        @Query("endLat") endLat: Double,
+        @Query("endLng") endLng: Double
+    ): Response<ResponseBody>
+
+    // ═══════════════════════════════════════════════
     // UTILITY
     // ═══════════════════════════════════════════════
 

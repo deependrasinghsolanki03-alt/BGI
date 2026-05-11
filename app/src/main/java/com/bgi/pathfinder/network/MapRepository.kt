@@ -185,6 +185,119 @@ class MapRepository {
     }
 
     // ═══════════════════════════════════════════════
+    // BBox Graph — For Hybrid Map Overlay
+    // ═══════════════════════════════════════════════
+
+    /**
+     * Fetch road network for a visible map viewport.
+     * Used by HybridMapOverlay for live vector rendering.
+     *
+     * Uses the stream-map endpoint with SW/NE corners as start/end,
+     * which triggers the LOD system on the backend.
+     *
+     * Returns null on failure (non-critical — tiles still show).
+     */
+    suspend fun fetchBBoxGraph(
+        south: Double, west: Double,
+        north: Double, east: Double
+    ): GraphResult? = withContext(Dispatchers.IO) {
+
+        // Attempt 1: Protobuf via stream-map (fastest)
+        try {
+            val response = api.streamMapBBox(
+                startLat = south, startLng = west,
+                endLat = north, endLng = east
+            )
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) {
+                    val bytes = body.bytes()
+                    if (bytes.isNotEmpty()) {
+                        val decodeStart = System.currentTimeMillis()
+                        val mapGraph = MapProto.MapGraph.parseFrom(bytes)
+                        val graph = Graph()
+
+                        for (protoNode in mapGraph.nodesList) {
+                            graph.addNode(Node(
+                                id = protoNode.id,
+                                lat = protoNode.lat,
+                                lng = protoNode.lng,
+                                name = protoNode.name
+                            ))
+                        }
+                        for (protoEdge in mapGraph.edgesList) {
+                            graph.addEdge(Edge(
+                                from = protoEdge.startNode,
+                                to = protoEdge.endNode,
+                                distance = protoEdge.distance,
+                                trafficMultiplier = protoEdge.trafficMultiplier,
+                                roadQualityMultiplier = protoEdge.qualityMultiplier,
+                                isOneWay = protoEdge.isOneWay,
+                                roadType = protoEdge.roadType,
+                                speedKmh = protoEdge.speedKmh
+                            ))
+                        }
+
+                        val decodeTimeMs = System.currentTimeMillis() - decodeStart
+                        val lodTier = response.headers()["X-LOD-Tier"] ?: "?"
+                        Log.d(TAG, "📦 BBox proto: ${graph.nodeCount()} nodes, LOD=$lodTier")
+                        return@withContext GraphResult(graph, "protobuf-bbox", bytes.size, decodeTimeMs)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "⚠️ BBox protobuf failed: ${e.message}")
+        }
+
+        // Attempt 2: JSON via subgraph-bbox
+        try {
+            val response = api.getSubgraphByBbox(south, west, north, east)
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) {
+                    val jsonStr = body.string()
+                    val decodeStart = System.currentTimeMillis()
+                    val json = JSONObject(jsonStr)
+                    val graph = Graph()
+
+                    val nodesArray = json.getJSONArray("nodes")
+                    for (i in 0 until nodesArray.length()) {
+                        val n = nodesArray.getJSONObject(i)
+                        graph.addNode(Node(
+                            id = n.getString("id"),
+                            lat = n.getDouble("lat"),
+                            lng = n.getDouble("lng"),
+                            name = n.optString("name", "")
+                        ))
+                    }
+                    val edgesArray = json.getJSONArray("edges")
+                    for (i in 0 until edgesArray.length()) {
+                        val e = edgesArray.getJSONObject(i)
+                        graph.addEdge(Edge(
+                            from = e.getString("from"),
+                            to = e.getString("to"),
+                            distance = e.getDouble("distance"),
+                            trafficMultiplier = e.optDouble("trafficMultiplier", 1.0),
+                            roadQualityMultiplier = e.optDouble("roadQualityMultiplier", 1.0),
+                            isOneWay = e.optBoolean("isOneWay", false),
+                            roadType = e.optString("roadType", ""),
+                            speedKmh = e.optDouble("speedKmh", 25.0)
+                        ))
+                    }
+
+                    val decodeTimeMs = System.currentTimeMillis() - decodeStart
+                    Log.d(TAG, "📦 BBox JSON: ${graph.nodeCount()} nodes")
+                    return@withContext GraphResult(graph, "json-bbox", jsonStr.length, decodeTimeMs)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "⚠️ BBox JSON failed: ${e.message}")
+        }
+
+        null // Non-critical — tiles still show
+    }
+
+    // ═══════════════════════════════════════════════
     // Health check (local backend)
     // ═══════════════════════════════════════════════
 

@@ -26,6 +26,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bgi.pathfinder.R
 import com.bgi.pathfinder.algorithm.AStarAlgorithm
+import com.bgi.pathfinder.map.HybridMapOverlay
 import com.bgi.pathfinder.models.*
 import com.bgi.pathfinder.network.LocalSearchService
 import com.bgi.pathfinder.network.MapRepository
@@ -37,6 +38,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
@@ -87,6 +91,9 @@ class MapActivity : AppCompatActivity() {
     // GPS / Location overlay
     private var locationOverlay: MyLocationNewOverlay? = null
 
+    // Hybrid Map — Vector overlay on top of raster tiles
+    private lateinit var hybridOverlay: HybridMapOverlay
+
     // Map overlays
     private val markers = mutableListOf<Marker>()
     private val routePolylines = mutableListOf<Polyline>()
@@ -130,6 +137,13 @@ class MapActivity : AppCompatActivity() {
         locationOverlay?.disableMyLocation()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        if (::hybridOverlay.isInitialized) {
+            hybridOverlay.destroy()
+        }
+    }
+
     // ═══════════════════════════════════════
     // View Initialization
     // ═══════════════════════════════════════
@@ -153,15 +167,28 @@ class MapActivity : AppCompatActivity() {
     }
 
     /**
-     * Configure map with cached tile support.
+     * Configure Hybrid Map:
      *
-     * IMPORTANT: Map TILES (visual background) use MAPNIK for display.
-     * OSMDroid caches tiles locally — once loaded, they work offline too.
+     * LAYER 0 — MAPNIK Raster Tiles (online, cached locally)
+     *   Provides the visual "filler" so the map never looks empty.
+     *   Includes terrain, labels, buildings, parks, etc.
+     *
+     * LAYER 1 — GPS Blue Dot
+     *   User's current location.
+     *
+     * LAYER 2 — HybridMapOverlay (Local Vector Roads)
+     *   Polylines fetched from our local Node.js backend.
+     *   Bold, distinct colors (blue motorways, orange primary roads)
+     *   that stand out ON TOP of the background tiles.
+     *   LOD-aware: zoomed in = all roads, zoomed out = highways only.
+     *
+     * LAYER 3+ — Route polylines & markers (user actions)
      *
      * All ROUTING + SEARCH is still 100% LOCAL (MongoDB only).
-     * Tiles are just the visual background — roads, terrain, labels.
+     * Only the background tiles come from the internet.
      */
     private fun setupOfflineMap() {
+        // ── Part 1: Background Raster Layer ──
         // MAPNIK tiles for visual map — cached locally by OSMDroid
         mapView.setTileSource(TileSourceFactory.MAPNIK)
 
@@ -172,6 +199,34 @@ class MapActivity : AppCompatActivity() {
 
         mapView.isHorizontalMapRepetitionEnabled = false
         mapView.isVerticalMapRepetitionEnabled = false
+
+        // Enable tile caching for offline use
+        val config = Configuration.getInstance()
+        config.tileFileSystemCacheMaxBytes = 200L * 1024 * 1024  // 200MB cache
+        config.tileFileSystemCacheTrimBytes = 150L * 1024 * 1024 // Trim at 150MB
+
+        // ── Part 2: Local Vector Overlay ──
+        hybridOverlay = HybridMapOverlay(mapView, mapRepository)
+        hybridOverlay.attach()
+
+        // ── Part 3: Zoom & Scroll Listener ──
+        // Triggers LOD-aware data fetching on map movement
+        mapView.addMapListener(object : MapListener {
+            override fun onScroll(event: ScrollEvent?): Boolean {
+                hybridOverlay.onMapMoved()
+                return false
+            }
+
+            override fun onZoom(event: ZoomEvent?): Boolean {
+                hybridOverlay.onMapMoved()
+                return false
+            }
+        })
+
+        // Initial fetch after map is ready
+        mapView.post {
+            hybridOverlay.refresh()
+        }
     }
 
     // ═══════════════════════════════════════
@@ -396,8 +451,8 @@ class MapActivity : AppCompatActivity() {
 
         val distKm = org.osmdroid.util.GeoPoint(start.latitude, start.longitude)
             .distanceToAsDouble(GeoPoint(end.latitude, end.longitude)) / 1000.0
-        if (distKm > 10) {
-            Toast.makeText(this, "Points are ${String.format("%.1f", distKm)}km apart. Max ~5km recommended.", Toast.LENGTH_LONG).show()
+        if (distKm > 50) {
+            Toast.makeText(this, "Points are ${String.format("%.1f", distKm)}km apart. Max ~50km with LOD.", Toast.LENGTH_LONG).show()
         }
 
         btnFindRoutes.isEnabled = false
