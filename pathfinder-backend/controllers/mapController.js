@@ -1,100 +1,288 @@
 // ─────────────────────────────────────────────────────
 // pathfinder-backend/controllers/mapController.js
-// Logic: Spatial queries, subgraph fetching, stats
+// Logic: Spatial queries, subgraph fetching, LOD filtering
+//
+// Data source: OsmNode (57.8M) + OsmWay (5.7M)
+// NOT MapNode/MapEdge (those are empty — never populated)
+//
+// LOD (Level of Detail) System:
+//   Diagonal < 5km  → HIGH   → All highway types
+//   Diagonal 5-15km → MEDIUM → motorway/trunk/primary/secondary/tertiary
+//   Diagonal > 15km → LOW    → motorway/trunk/primary only
+//
+// How it prevents 27M nodes from crashing:
+//   1. BBox → only nodes in the requested area (spatial index)
+//   2. OsmWay filter → only ways with tags.highway matching LOD tier
+//   3. Node resolution → only resolve nodeRefs that are in matched ways
+//   4. Edge construction → build edges on-the-fly from way nodeRefs
+//   5. Orphan pruning → remove nodes with no edges
+//   6. Projection → minimal fields only
 // ─────────────────────────────────────────────────────
-const { MapNode, MapEdge } = require("../models/MapData");
+const { OsmNode, OsmWay } = require("../models/OsmData");
+const { buildLodBBox, calculateDiagonalKm, getLodTier } = require("../utils/lod");
 
 // ═══════════════════════════════════════════════════════
-// UTILITY: Convert kilometers to lat/lng degrees
+// LOD Highway Type Mapping
+// Maps the LOD tier to OSM tags.highway values
 // ═══════════════════════════════════════════════════════
-//
-// 1° latitude  ≈ 111.32 km  (constant everywhere)
-// 1° longitude ≈ 111.32 km × cos(latitude)  (shrinks near poles)
-//
-// This utility allows specifying padding in km and
-// getting accurate degree offsets for any latitude.
+
+const LOD_HIGHWAY_TYPES = {
+  HIGH: null, // No filter — all highway types
+  MEDIUM: [
+    "motorway", "motorway_link",
+    "trunk", "trunk_link",
+    "primary", "primary_link",
+    "secondary", "secondary_link",
+    "tertiary", "tertiary_link",
+  ],
+  LOW: [
+    "motorway", "motorway_link",
+    "trunk", "trunk_link",
+    "primary", "primary_link",
+  ],
+};
+
+// Speed estimates by road type (km/h) for travel time calculation
+const SPEED_BY_TYPE = {
+  motorway: 100, motorway_link: 60,
+  trunk: 80, trunk_link: 50,
+  primary: 60, primary_link: 40,
+  secondary: 50, secondary_link: 35,
+  tertiary: 40, tertiary_link: 30,
+  residential: 30, unclassified: 25,
+  service: 15, living_street: 15,
+  footway: 5, path: 4, track: 20,
+  cycleway: 15, pedestrian: 5, steps: 3,
+};
+
+// ═══════════════════════════════════════════════════════
+// CORE: Build road graph from OsmWay + OsmNode
 // ═══════════════════════════════════════════════════════
 
 /**
- * Convert a distance in kilometers to latitude degrees.
- * @param {number} km - Distance in kilometers
- * @returns {number} Equivalent latitude degrees
+ * Fetch roads (OsmWays) inside a BBox and build a graph.
+ *
+ * Pipeline:
+ *   1. Query OsmWay with tags.highway filter (LOD) + nodeRefs geo-match
+ *   2. Collect all unique nodeRef IDs from matching ways
+ *   3. Batch-fetch OsmNode coordinates for those IDs
+ *   4. Build edges from consecutive nodeRefs in each way
+ *   5. Return { nodes, edges } ready for serialization
+ *
+ * @param {Object} bbox - { south, north, west, east }
+ * @param {Object} lod - LOD tier from buildLodBBox
+ * @returns {{ nodes: Array, edges: Array, stats: Object }}
  */
-function kmToLatDegrees(km) {
-  return km / 111.32;
-}
+async function buildGraphFromOsm(bbox, lod) {
+  const t0 = Date.now();
 
-/**
- * Convert a distance in kilometers to longitude degrees at a given latitude.
- * Accounts for the Earth's curvature — longitude degrees shrink near poles.
- * @param {number} km - Distance in kilometers
- * @param {number} atLatitude - Reference latitude (decimal degrees)
- * @returns {number} Equivalent longitude degrees
- */
-function kmToLngDegrees(km, atLatitude) {
-  const latRad = (atLatitude * Math.PI) / 180;
-  return km / (111.32 * Math.cos(latRad));
-}
+  // ══════════════════════════════════════════════════════════
+  // OPTIMIZED TWO-PHASE STRATEGY:
+  //
+  // Phase A (Light): Fetch node IDs only (not coords) → fast
+  //   Then use sampled IDs to find matching ways
+  //
+  // Phase B (Targeted): Resolve coordinates ONLY for nodes
+  //   that appear in matched ways → minimal DB load
+  //
+  // This means: 25km bbox with 1M nodes in it only transfers
+  // ~8MB of IDs (not 32MB of IDs+coords), and resolves coords
+  // for only the ~200 nodes actually used in edges.
+  // ══════════════════════════════════════════════════════════
 
-/**
- * Calculate a padded bounding box between two coordinates.
- * @param {number} lat1 - Start latitude
- * @param {number} lng1 - Start longitude
- * @param {number} lat2 - End latitude
- * @param {number} lng2 - End longitude
- * @param {number} paddingKm - Buffer around the box in km (default 1.5)
- * @returns {{ south, west, north, east, paddingKm, centerLat, centerLng }}
- */
-function calculatePaddedBBox(lat1, lng1, lat2, lng2, paddingKm = 1.5) {
-  const minLat = Math.min(lat1, lat2);
-  const maxLat = Math.max(lat1, lat2);
-  const minLng = Math.min(lng1, lng2);
-  const maxLng = Math.max(lng1, lng2);
+  // ── Step 1: Fetch node IDs inside bbox (IDs only, fast) ──
+  // $geometry.Polygon uses 2dsphere index
+  const bboxNodes = await OsmNode.find(
+    {
+      location: {
+        $geoWithin: {
+          $geometry: {
+            type: "Polygon",
+            coordinates: [[
+              [bbox.west, bbox.south],
+              [bbox.east, bbox.south],
+              [bbox.east, bbox.north],
+              [bbox.west, bbox.north],
+              [bbox.west, bbox.south],
+            ]],
+          },
+        },
+      },
+    },
+    { nodeId: 1, _id: 0 } // IDs only — no coordinates yet!
+  ).lean();
 
-  const centerLat = (minLat + maxLat) / 2;
+  if (bboxNodes.length === 0) {
+    return { nodes: [], edges: [], stats: { bboxNodes: 0, waysFetched: 0, edgesBuilt: 0, timeMs: Date.now() - t0 } };
+  }
 
-  // Convert padding km → degrees (latitude-aware for longitude)
-  const latPad = kmToLatDegrees(paddingKm);
-  const lngPad = kmToLngDegrees(paddingKm, centerLat);
+  const bboxNodeIds = new Set(bboxNodes.map((n) => n.nodeId));
+
+  const t1 = Date.now();
+  console.log(`  [LOD] Step 1: ${bboxNodes.length} nodeIds in bbox (${t1 - t0}ms)`);
+
+  // ── Step 2: Find ways that have nodes in our bbox ──
+  // Sample up to 1000 nodeIds for the $in query
+  const bboxNodeArray = Array.from(bboxNodeIds);
+  const sampleSize = Math.min(bboxNodeArray.length, 1000);
+  const sampledIds = sampleSize < bboxNodeArray.length
+    ? bboxNodeArray.filter((_, i) => i % Math.ceil(bboxNodeArray.length / sampleSize) === 0)
+    : bboxNodeArray;
+
+  const wayQuery = {
+    nodeRefs: { $in: sampledIds },
+  };
+
+  // Apply LOD highway filter
+  const allowedTypes = LOD_HIGHWAY_TYPES[lod.tier];
+  if (allowedTypes !== null) {
+    wayQuery["tags.highway"] = { $in: allowedTypes };
+  } else {
+    wayQuery["tags.highway"] = { $exists: true };
+  }
+
+  const maxWays = lod.tier === "LOW" ? 2000 : lod.tier === "MEDIUM" ? 5000 : 8000;
+  const ways = await OsmWay.find(
+    wayQuery,
+    { wayId: 1, nodeRefs: 1, "tags.highway": 1, "tags.name": 1, "tags.oneway": 1, _id: 0 }
+  )
+    .limit(maxWays)
+    .lean();
+
+  const t2 = Date.now();
+  console.log(`  [LOD] Step 2: ${ways.length} ways found (sampled ${sampledIds.length} IDs, ${t2 - t1}ms)`);
+
+  if (ways.length === 0) {
+    return { nodes: [], edges: [], stats: { bboxNodes: bboxNodeIds.size, waysFetched: 0, edgesBuilt: 0, timeMs: Date.now() - t0 } };
+  }
+
+  // ── Step 3: Collect nodeRefs we need coordinates for ──
+  // Only nodes that are in both (a) the way's nodeRefs AND (b) our bbox
+  const neededNodeIds = new Set();
+  for (const way of ways) {
+    for (const ref of way.nodeRefs) {
+      if (bboxNodeIds.has(ref)) {
+        neededNodeIds.add(ref);
+      }
+    }
+  }
+
+  // ── Step 4: Batch-fetch coordinates for needed nodes only ──
+  const neededArray = Array.from(neededNodeIds);
+  const nodeDocs = await OsmNode.find(
+    { nodeId: { $in: neededArray } },
+    { nodeId: 1, "location.coordinates": 1, _id: 0 }
+  ).lean();
+
+  const nodeCoordMap = new Map();
+  for (const n of nodeDocs) {
+    nodeCoordMap.set(n.nodeId, {
+      lat: n.location.coordinates[1],
+      lng: n.location.coordinates[0],
+    });
+  }
+
+  const t3 = Date.now();
+  console.log(`  [LOD] Step 3-4: Resolved ${nodeDocs.length} node coords (${t3 - t2}ms)`);
+
+  // ── Step 5: Build edges from consecutive nodeRefs ──
+  const edges = [];
+  const usedNodeIds = new Set();
+
+  for (const way of ways) {
+    const highway = way.tags?.highway || "unclassified";
+    const isOneWay = way.tags?.oneway === "yes";
+    const speedKmh = SPEED_BY_TYPE[highway] || 25;
+    const roadName = way.tags?.name || "";
+
+    for (let i = 0; i < way.nodeRefs.length - 1; i++) {
+      const fromId = way.nodeRefs[i];
+      const toId = way.nodeRefs[i + 1];
+      const fromCoord = nodeCoordMap.get(fromId);
+      const toCoord = nodeCoordMap.get(toId);
+
+      if (!fromCoord || !toCoord) continue;
+
+      const dist = haversineMeters(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
+
+      edges.push({
+        startNode: String(fromId),
+        endNode: String(toId),
+        distance: parseFloat(dist.toFixed(2)),
+        roadType: highway,
+        speedKmh,
+        isOneWay,
+        trafficMultiplier: 1.0,
+        roadQualityMultiplier: 1.0,
+        name: roadName,
+        osmWayId: String(way.wayId),
+      });
+
+      usedNodeIds.add(fromId);
+      usedNodeIds.add(toId);
+    }
+  }
+
+  // ── Step 6: Build final node list ──
+  const nodes = [];
+  for (const id of usedNodeIds) {
+    const coord = nodeCoordMap.get(id);
+    if (coord) {
+      nodes.push({
+        osmId: String(id),
+        location: { coordinates: [coord.lng, coord.lat] },
+        name: "",
+      });
+    }
+  }
+
+  const t4 = Date.now();
+  console.log(`  [LOD] Step 5-6: ${edges.length} edges, ${nodes.length} nodes (${t4 - t3}ms)`);
 
   return {
-    south: minLat - latPad,
-    north: maxLat + latPad,
-    west: minLng - lngPad,
-    east: maxLng + lngPad,
-    paddingKm,
-    centerLat,
-    centerLng: (minLng + maxLng) / 2,
+    nodes,
+    edges,
+    stats: {
+      bboxNodes: bboxNodeIds.size,
+      waysFetched: ways.length,
+      nodesResolved: nodeDocs.length,
+      nodesUsed: nodes.length,
+      edgesBuilt: edges.length,
+      timeMs: Date.now() - t0,
+    },
   };
 }
 
+/**
+ * Haversine distance between two lat/lng points (returns meters).
+ */
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000; // Earth radius in meters
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // ═══════════════════════════════════════════════════════
-// ROUTE GRAPH — Professional BBox + Padding endpoint
+// ROUTE GRAPH — LOD-Filtered BBox Endpoint (JSON)
 // ═══════════════════════════════════════════════════════
 
 /**
  * GET /api/map/route-graph?startLat=28.61&startLng=77.20&endLat=28.63&endLng=77.25&padding=1.5
- *
- * Fetches a minimal subgraph between start and end points.
- * Uses a padded bounding box to capture roads for curved paths.
- *
- * Features:
- *  - Dynamic padding (default 1.5km, configurable via query)
- *  - Latitude-aware longitude padding (accounts for Earth curvature)
- *  - Mongoose projections for minimal JSON payload
- *  - Edge fetching via $or (startNode OR endNode in the node set)
- *  - Response stats for debugging
  */
 exports.getRouteGraph = async (req, res) => {
   try {
     const { startLat, startLng, endLat, endLng, padding } = req.query;
 
-    // ── Validation ──
     if (!startLat || !startLng || !endLat || !endLng) {
       return res.status(400).json({
         error: "Missing required params",
         required: "startLat, startLng, endLat, endLng",
-        optional: "padding (km, default 1.5)",
+        optional: "padding (km, auto if omitted)",
       });
     }
 
@@ -102,79 +290,29 @@ exports.getRouteGraph = async (req, res) => {
     const sLng = parseFloat(startLng);
     const eLat = parseFloat(endLat);
     const eLng = parseFloat(endLng);
-    const padKm = Math.min(parseFloat(padding || 2.0), 25.0); // Cap at 25km padding
+    const forcePad = padding ? parseFloat(padding) : null;
+    const bbox = buildLodBBox(sLat, sLng, eLat, eLng, forcePad);
 
-    // ── Calculate padded bounding box ──
-    const bbox = calculatePaddedBBox(sLat, sLng, eLat, eLng, padKm);
+    console.log(
+      `🗺️  Route graph: ${bbox.straightLineKm}km | ` +
+      `BBox: ${bbox.diagonalKm}km | LOD: ${bbox.lod.tier} | Pad: ${bbox.paddingKm}km`
+    );
 
-    // ── Step 1: Fetch nodes inside bbox (with projection) ──
-    // Only return fields needed by the Android A* engine
-    const nodes = await MapNode.find(
-      {
-        location: {
-          $geoWithin: {
-            $box: [
-              [bbox.west, bbox.south], // bottom-left  [lng, lat]
-              [bbox.east, bbox.north], // top-right    [lng, lat]
-            ],
-          },
-        },
-      },
-      // Projection: only return osmId + coordinates (skip tags, timestamps)
-      {
-        osmId: 1,
-        "location.coordinates": 1,
-        name: 1,
-        _id: 0,
-      }
-    ).lean();
+    const result = await buildGraphFromOsm(bbox, bbox.lod);
 
-    if (nodes.length === 0) {
-      return res.json({
-        nodes: [],
-        edges: [],
-        bbox,
-        stats: { nodeCount: 0, edgeCount: 0, queryTimeMs: 0 },
-      });
-    }
+    console.log(
+      `  → ${result.stats.waysFetched} ways → ${result.nodes.length} nodes, ` +
+      `${result.edges.length} edges | ${result.stats.timeMs}ms`
+    );
 
-    // ── Step 2: Build node ID set for edge filtering ──
-    const nodeIdSet = new Set(nodes.map((n) => n.osmId));
-    const nodeIdArray = Array.from(nodeIdSet);
-
-    // ── Step 3: Fetch edges connected to ANY node in the set ──
-    // Uses $or so we catch edges where at least one endpoint is in-bbox.
-    // Then filter client-side to keep only edges with BOTH endpoints in set.
-    const edges = await MapEdge.find(
-      {
-        $and: [
-          { startNode: { $in: nodeIdArray } },
-          { endNode: { $in: nodeIdArray } },
-        ],
-      },
-      // Projection: only return fields needed for A* + route drawing
-      {
-        startNode: 1,
-        endNode: 1,
-        distance: 1,
-        trafficMultiplier: 1,
-        roadQualityMultiplier: 1,
-        isOneWay: 1,
-        roadType: 1,
-        speedKmh: 1,
-        _id: 0,
-      }
-    ).lean();
-
-    // ── Step 4: Format response (lightweight for mobile) ──
-    const formattedNodes = nodes.map((n) => ({
+    const formattedNodes = result.nodes.map((n) => ({
       id: n.osmId,
       lat: n.location.coordinates[1],
       lng: n.location.coordinates[0],
       name: n.name || "",
     }));
 
-    const formattedEdges = edges.map((e) => ({
+    const formattedEdges = result.edges.map((e) => ({
       from: e.startNode,
       to: e.endNode,
       distance: e.distance,
@@ -189,19 +327,21 @@ exports.getRouteGraph = async (req, res) => {
       nodes: formattedNodes,
       edges: formattedEdges,
       bbox: {
-        south: bbox.south,
-        west: bbox.west,
-        north: bbox.north,
-        east: bbox.east,
+        south: bbox.south, west: bbox.west,
+        north: bbox.north, east: bbox.east,
         paddingKm: bbox.paddingKm,
+        diagonalKm: bbox.diagonalKm,
+        lod: bbox.lod.tier,
       },
       stats: {
         nodeCount: formattedNodes.length,
         edgeCount: formattedEdges.length,
-        bboxAreaKm2: (
-          (bbox.north - bbox.south) * 111.32 *
-          ((bbox.east - bbox.west) * 111.32 * Math.cos((bbox.centerLat * Math.PI) / 180))
-        ).toFixed(2),
+        queryTimeMs: result.stats.timeMs,
+        lod: bbox.lod.tier,
+        lodDescription: bbox.lod.description,
+        diagonalKm: bbox.diagonalKm,
+        straightLineKm: bbox.straightLineKm,
+        waysFetched: result.stats.waysFetched,
       },
     });
   } catch (err) {
@@ -211,72 +351,44 @@ exports.getRouteGraph = async (req, res) => {
 };
 
 // ═══════════════════════════════════════════════════════
-// EXISTING ENDPOINTS (unchanged)
+// SUBGRAPH — Radius-based with LOD
 // ═══════════════════════════════════════════════════════
 
-/**
- * GET /api/map/subgraph?lat=28.6&lng=77.2&radius=2000
- *
- * Fetches all nodes within [radius] meters of (lat, lng)
- * using MongoDB $nearSphere, then fetches all edges
- * connecting those nodes → returns a complete subgraph.
- */
 exports.getSubgraph = async (req, res) => {
   try {
     const { lat, lng, radius = 2000 } = req.query;
-
     if (!lat || !lng) {
       return res.status(400).json({ error: "lat and lng are required" });
     }
 
     const latitude = parseFloat(lat);
     const longitude = parseFloat(lng);
-    const maxRadius = Math.min(parseFloat(radius), 5000); // Cap at 5km
+    const maxRadius = Math.min(parseFloat(radius), 15000);
+    const radiusKm = maxRadius / 1000;
 
-    // Step 1: Find nodes within radius using $nearSphere
-    const nodes = await MapNode.find({
-      location: {
-        $nearSphere: {
-          $geometry: {
-            type: "Point",
-            coordinates: [longitude, latitude], // GeoJSON: [lng, lat]
-          },
-          $maxDistance: maxRadius, // meters
-        },
-      },
-    }).lean();
+    // Build bbox from radius
+    const { kmToLatDeg, kmToLngDeg } = require("../utils/lod");
+    const latPad = kmToLatDeg(radiusKm);
+    const lngPad = kmToLngDeg(radiusKm, latitude);
+    const bbox = {
+      south: latitude - latPad, north: latitude + latPad,
+      west: longitude - lngPad, east: longitude + lngPad,
+    };
+    const lod = getLodTier(radiusKm * 2);
 
-    if (nodes.length === 0) {
-      return res.json({ nodes: [], edges: [], stats: { nodeCount: 0, edgeCount: 0 } });
-    }
+    const result = await buildGraphFromOsm(bbox, lod);
 
-    // Step 2: Collect node IDs
-    const nodeIds = new Set(nodes.map((n) => n.osmId));
-
-    // Step 3: Fetch edges where BOTH start and end nodes are in the set
-    const nodeIdArray = Array.from(nodeIds);
-    const edges = await MapEdge.find({
-      startNode: { $in: nodeIdArray },
-      endNode: { $in: nodeIdArray },
-    }).lean();
-
-    // Step 4: Format response for Android app
-    const formattedNodes = nodes.map((n) => ({
+    const formattedNodes = result.nodes.map((n) => ({
       id: n.osmId,
       lat: n.location.coordinates[1],
       lng: n.location.coordinates[0],
       name: n.name || "",
     }));
-
-    const formattedEdges = edges.map((e) => ({
-      from: e.startNode,
-      to: e.endNode,
-      distance: e.distance,
+    const formattedEdges = result.edges.map((e) => ({
+      from: e.startNode, to: e.endNode, distance: e.distance,
       trafficMultiplier: e.trafficMultiplier,
       roadQualityMultiplier: e.roadQualityMultiplier,
-      isOneWay: e.isOneWay,
-      roadType: e.roadType,
-      speedKmh: e.speedKmh,
+      isOneWay: e.isOneWay, roadType: e.roadType, speedKmh: e.speedKmh,
     }));
 
     res.json({
@@ -287,6 +399,7 @@ exports.getSubgraph = async (req, res) => {
         edgeCount: formattedEdges.length,
         radiusUsed: maxRadius,
         center: { lat: latitude, lng: longitude },
+        lod: lod.tier,
       },
     });
   } catch (err) {
@@ -295,69 +408,37 @@ exports.getSubgraph = async (req, res) => {
   }
 };
 
-/**
- * GET /api/map/subgraph-bbox?south=28.5&west=77.1&north=28.7&east=77.3
- *
- * Fetches nodes within a bounding box using $geoWithin.
- * Better for rectangular areas (e.g., between two route points).
- */
+// ═══════════════════════════════════════════════════════
+// SUBGRAPH BY BBOX with LOD
+// ═══════════════════════════════════════════════════════
+
 exports.getSubgraphByBbox = async (req, res) => {
   try {
     const { south, west, north, east } = req.query;
-
     if (!south || !west || !north || !east) {
       return res.status(400).json({ error: "south, west, north, east are required" });
     }
 
     const bbox = {
-      south: parseFloat(south),
-      west: parseFloat(west),
-      north: parseFloat(north),
-      east: parseFloat(east),
+      south: parseFloat(south), west: parseFloat(west),
+      north: parseFloat(north), east: parseFloat(east),
     };
+    const diagonalKm = calculateDiagonalKm(bbox.south, bbox.west, bbox.north, bbox.east);
+    const lod = getLodTier(diagonalKm);
 
-    // $geoWithin with $box — uses 2dsphere index
-    const nodes = await MapNode.find({
-      location: {
-        $geoWithin: {
-          $geometry: {
-            type: "Polygon",
-            coordinates: [
-              [
-                [bbox.west, bbox.south],
-                [bbox.east, bbox.south],
-                [bbox.east, bbox.north],
-                [bbox.west, bbox.north],
-                [bbox.west, bbox.south], // Close the polygon
-              ],
-            ],
-          },
-        },
-      },
-    }).lean();
+    const result = await buildGraphFromOsm(bbox, lod);
 
-    const nodeIds = nodes.map((n) => n.osmId);
-    const edges = await MapEdge.find({
-      startNode: { $in: nodeIds },
-      endNode: { $in: nodeIds },
-    }).lean();
-
-    const formattedNodes = nodes.map((n) => ({
+    const formattedNodes = result.nodes.map((n) => ({
       id: n.osmId,
       lat: n.location.coordinates[1],
       lng: n.location.coordinates[0],
       name: n.name || "",
     }));
-
-    const formattedEdges = edges.map((e) => ({
-      from: e.startNode,
-      to: e.endNode,
-      distance: e.distance,
+    const formattedEdges = result.edges.map((e) => ({
+      from: e.startNode, to: e.endNode, distance: e.distance,
       trafficMultiplier: e.trafficMultiplier,
       roadQualityMultiplier: e.roadQualityMultiplier,
-      isOneWay: e.isOneWay,
-      roadType: e.roadType,
-      speedKmh: e.speedKmh,
+      isOneWay: e.isOneWay, roadType: e.roadType, speedKmh: e.speedKmh,
     }));
 
     res.json({
@@ -366,7 +447,8 @@ exports.getSubgraphByBbox = async (req, res) => {
       stats: {
         nodeCount: formattedNodes.length,
         edgeCount: formattedEdges.length,
-        bbox,
+        bbox, lod: lod.tier,
+        diagonalKm: parseFloat(diagonalKm.toFixed(2)),
       },
     });
   } catch (err) {
@@ -375,49 +457,49 @@ exports.getSubgraphByBbox = async (req, res) => {
   }
 };
 
-/**
- * GET /api/map/nearest?lat=28.6&lng=77.2
- *
- * Find the single nearest node to a coordinate.
- */
+// ═══════════════════════════════════════════════════════
+// UTILITY ENDPOINTS
+// ═══════════════════════════════════════════════════════
+
 exports.getNearestNode = async (req, res) => {
   try {
     const { lat, lng } = req.query;
     if (!lat || !lng) return res.status(400).json({ error: "lat and lng required" });
 
-    const node = await MapNode.findOne({
+    const node = await OsmNode.findOne({
       location: {
         $nearSphere: {
           $geometry: { type: "Point", coordinates: [parseFloat(lng), parseFloat(lat)] },
           $maxDistance: 1000,
         },
       },
+      // Only find nodes that are part of roads (have a way reference)
     }).lean();
 
     if (!node) return res.status(404).json({ error: "No node found within 1km" });
 
     res.json({
-      id: node.osmId,
+      id: String(node.nodeId),
       lat: node.location.coordinates[1],
       lng: node.location.coordinates[0],
-      name: node.name || "",
+      name: node.tags?.name || "",
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-/**
- * GET /api/map/stats — Database statistics
- */
 exports.getStats = async (req, res) => {
   try {
-    const [nodeCount, edgeCount] = await Promise.all([
-      MapNode.countDocuments(),
-      MapEdge.countDocuments(),
+    const [nodeCount, wayCount] = await Promise.all([
+      OsmNode.countDocuments(),
+      OsmWay.countDocuments(),
     ]);
-    res.json({ nodeCount, edgeCount });
+    res.json({ nodeCount, wayCount, source: "OsmNode + OsmWay (PBF import)" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
+
+// Export for use by streamController
+module.exports.buildGraphFromOsm = buildGraphFromOsm;

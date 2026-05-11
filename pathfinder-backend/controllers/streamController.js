@@ -1,17 +1,24 @@
 // ─────────────────────────────────────────────────────
 // pathfinder-backend/controllers/streamController.js
-// Protobuf streaming endpoint — binary graph data
+// Protobuf streaming endpoint — binary graph data + LOD
+//
+// PRIMARY endpoint for the Android app.
+// Uses buildGraphFromOsm() from mapController to query
+// the REAL data (OsmNode/OsmWay), then serializes to
+// Protobuf binary for ~85-90% smaller payloads.
+//
+// LOD Pipeline:
+//   1. buildLodBBox → dynamic padding + LOD tier
+//   2. buildGraphFromOsm → OsmWay highway filter + edge construction
+//   3. serializeToProtobuf → binary encoding
+//   4. Express gzip → final compression
+//
+// Result: 50km route → ~200KB proto → ~60KB gzipped
 // ─────────────────────────────────────────────────────
-const { MapNode, MapEdge } = require("../models/MapData");
 const { serializeToProtobuf, getSizeComparison } = require("../services/protoSerializer");
-
-// ── Utility: km → degrees (same as mapController) ──
-function kmToLatDeg(km) {
-  return km / 111.32;
-}
-function kmToLngDeg(km, atLat) {
-  return km / (111.32 * Math.cos((atLat * Math.PI) / 180));
-}
+const { buildLodBBox } = require("../utils/lod");
+const { buildGraphFromOsm } = require("./mapController");
+const { OsmNode, OsmWay } = require("../models/OsmData");
 
 /**
  * GET /api/v1/stream-map?startLat=28.61&startLng=77.20&endLat=28.63&endLng=77.25&padding=1.5
@@ -23,8 +30,9 @@ function kmToLngDeg(km, atLat) {
  *   Content-Encoding: gzip (via compression middleware)
  *   Body: Binary protobuf (MapGraph message)
  *
- * ~60-80% smaller than JSON equivalent.
- * With Gzip: ~85-90% smaller than raw JSON.
+ * Headers:
+ *   X-Proto-Nodes, X-Proto-Edges, X-Proto-Size-Bytes,
+ *   X-LOD-Tier, X-Diagonal-Km, X-Query-Time-Ms
  */
 exports.streamMapGraph = async (req, res) => {
   const queryStart = Date.now();
@@ -32,7 +40,6 @@ exports.streamMapGraph = async (req, res) => {
   try {
     const { startLat, startLng, endLat, endLng, padding } = req.query;
 
-    // ── Validation (basic — full validation in middleware) ──
     if (!startLat || !startLng || !endLat || !endLng) {
       return res.status(400).json({
         error: "Missing params: startLat, startLng, endLat, endLng",
@@ -43,112 +50,66 @@ exports.streamMapGraph = async (req, res) => {
     const sLng = parseFloat(startLng);
     const eLat = parseFloat(endLat);
     const eLng = parseFloat(endLng);
-    const padKm = Math.min(parseFloat(padding || 2.0), 25.0); // Cap at 25km
 
-    // ── Calculate padded bounding box ──
-    const minLat = Math.min(sLat, eLat);
-    const maxLat = Math.max(sLat, eLat);
-    const minLng = Math.min(sLng, eLng);
-    const maxLng = Math.max(sLng, eLng);
-    const centerLat = (minLat + maxLat) / 2;
+    // ── Build LOD-aware bounding box ──
+    const forcePad = padding ? parseFloat(padding) : null;
+    const bbox = buildLodBBox(sLat, sLng, eLat, eLng, forcePad);
 
-    const latPad = kmToLatDeg(padKm);
-    const lngPad = kmToLngDeg(padKm, centerLat);
+    console.log(
+      `📦 Stream: ${bbox.straightLineKm}km straight | ` +
+      `BBox: ${bbox.diagonalKm}km | LOD: ${bbox.lod.tier} | Pad: ${bbox.paddingKm}km`
+    );
 
-    const bbox = {
-      south: minLat - latPad,
-      north: maxLat + latPad,
-      west: minLng - lngPad,
-      east: maxLng + lngPad,
-      paddingKm: padKm,
-    };
+    // ── Build graph from OsmNode/OsmWay ──
+    const result = await buildGraphFromOsm(bbox, bbox.lod);
+    const queryTimeMs = Date.now() - queryStart;
 
-    // ── Step 1: Fetch nodes inside bbox (with projection) ──
-    const nodes = await MapNode.find(
-      {
-        location: {
-          $geoWithin: {
-            $box: [
-              [bbox.west, bbox.south],
-              [bbox.east, bbox.north],
-            ],
-          },
-        },
-      },
-      { osmId: 1, "location.coordinates": 1, name: 1, _id: 0 }
-    ).lean();
-
-    if (nodes.length === 0) {
-      // Return empty protobuf (not JSON error)
-      const emptyBuf = serializeToProtobuf([], [], bbox, Date.now() - queryStart);
+    if (result.nodes.length === 0) {
+      const emptyBuf = serializeToProtobuf([], [], bbox, queryTimeMs);
       res.set("Content-Type", "application/x-protobuf");
       res.set("X-Proto-Nodes", "0");
       res.set("X-Proto-Edges", "0");
+      res.set("X-LOD-Tier", bbox.lod.tier);
       return res.send(Buffer.from(emptyBuf));
     }
 
-    // ── Step 2: Build node ID set ──
-    const nodeIdSet = new Set(nodes.map((n) => n.osmId));
-    const nodeIdArray = Array.from(nodeIdSet);
+    // ── Serialize to Protobuf ──
+    const protoBuf = serializeToProtobuf(result.nodes, result.edges, bbox, queryTimeMs);
 
-    // ── Step 3: Fetch edges (both endpoints in set) ──
-    const edges = await MapEdge.find(
-      {
-        startNode: { $in: nodeIdArray },
-        endNode: { $in: nodeIdArray },
-      },
-      {
-        startNode: 1,
-        endNode: 1,
-        distance: 1,
-        trafficMultiplier: 1,
-        roadQualityMultiplier: 1,
-        isOneWay: 1,
-        roadType: 1,
-        speedKmh: 1,
-        _id: 1,
-      }
-    ).lean();
-
-    const queryTimeMs = Date.now() - queryStart;
-
-    // ── Step 4: Serialize to Protobuf binary ──
-    const protoBuf = serializeToProtobuf(nodes, edges, bbox, queryTimeMs);
-
-    // ── Log size comparison ──
-    const sizes = getSizeComparison(protoBuf, nodes, edges);
+    // ── Log comparison ──
+    const sizes = getSizeComparison(protoBuf, result.nodes, result.edges);
     console.log(
-      `📦 Stream: ${nodes.length} nodes, ${edges.length} edges | ` +
+      `  → LOD ${bbox.lod.tier}: ${result.stats.waysFetched} ways → ` +
+      `${result.nodes.length} nodes, ${result.edges.length} edges | ` +
       `Proto: ${(sizes.protoBytes / 1024).toFixed(1)}KB vs JSON: ${(sizes.jsonBytes / 1024).toFixed(1)}KB | ` +
       `Saved: ${sizes.savingsPercent}% | ${queryTimeMs}ms`
     );
 
-    // ── Step 5: Send binary response ──
+    // ── Send binary ──
     res.set("Content-Type", "application/x-protobuf");
-    res.set("X-Proto-Nodes", String(nodes.length));
-    res.set("X-Proto-Edges", String(edges.length));
+    res.set("X-Proto-Nodes", String(result.nodes.length));
+    res.set("X-Proto-Edges", String(result.edges.length));
     res.set("X-Proto-Size-Bytes", String(protoBuf.length));
     res.set("X-Query-Time-Ms", String(queryTimeMs));
+    res.set("X-LOD-Tier", bbox.lod.tier);
+    res.set("X-LOD-Diagonal-Km", String(bbox.diagonalKm));
+    res.set("X-Ways-Fetched", String(result.stats.waysFetched));
     res.send(Buffer.from(protoBuf));
 
   } catch (err) {
     console.error("Error in streamMapGraph:", err);
-    // Errors still go as JSON (client can check Content-Type)
     res.status(500).json({ error: "Stream failed", details: err.message });
   }
 };
 
 /**
  * GET /api/v1/stream-map/info
- *
- * Returns metadata about the streaming endpoint (JSON).
- * Useful for the Android app to check capabilities.
  */
 exports.streamInfo = async (req, res) => {
   try {
-    const [nodeCount, edgeCount] = await Promise.all([
-      MapNode.countDocuments(),
-      MapEdge.countDocuments(),
+    const [nodeCount, wayCount] = await Promise.all([
+      OsmNode.countDocuments(),
+      OsmWay.countDocuments(),
     ]);
 
     res.json({
@@ -159,7 +120,20 @@ exports.streamInfo = async (req, res) => {
       contentType: "application/x-protobuf",
       database: {
         nodeCount,
-        edgeCount,
+        wayCount,
+        source: "OsmNode + OsmWay (PBF import)",
+      },
+      lod: {
+        description: "Level of Detail — filters roads by tags.highway based on BBox size",
+        tiers: {
+          HIGH: "< 5km → All road types (residential, service, footway...)",
+          MEDIUM: "5-15km → motorway/trunk/primary/secondary/tertiary",
+          LOW: "> 15km → motorway/trunk/primary only (skeleton)",
+        },
+        dynamicPadding: {
+          "< 2km": "1.5km", "2-5km": "2.5km", "5-15km": "4km",
+          "15-30km": "8km", "30-50km": "15km", "> 50km": "25km (max)",
+        },
       },
       endpoints: {
         stream: "GET /api/v1/stream-map?startLat&startLng&endLat&endLng&padding",

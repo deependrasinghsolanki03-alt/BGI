@@ -114,6 +114,8 @@ const mapEdgeSchema = new mongoose.Schema(
 
 // Compound index for fast edge lookups
 mapEdgeSchema.index({ startNode: 1, endNode: 1 });
+// LOD filtering — fast queries by road type
+mapEdgeSchema.index({ roadType: 1 });
 
 const MapNode = mongoose.model("MapNode", mapNodeSchema);
 const MapEdge = mongoose.model("MapEdge", mapEdgeSchema);
