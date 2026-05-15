@@ -1,6 +1,9 @@
 // app/src/main/java/com/bgi/pathfinder/ui/MapActivity.kt
 package com.bgi.pathfinder.ui
 
+import android.content.Intent
+import android.os.Build
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -56,8 +59,14 @@ class MapActivity : AppCompatActivity() {
     companion object {
         private const val LOCATION_PERMISSION_CODE = 1001
         private const val SMS_PERMISSION_CODE = 1002
+        private const val NOTIFICATION_PERMISSION_CODE = 1003
         private const val SOS_PHONE_NUMBER = "YOUR_TEST_NUMBER"
+        // ⚠️ CHANGE to your deployed Vercel URL
+        private const val TRACKING_BASE_URL = "https://your-vercel-app.vercel.app"
     }
+
+    private var isTracking = false
+    private var currentSosId: String? = null
 
     // Views
     private lateinit var mapView: MapView
@@ -506,43 +515,97 @@ class MapActivity : AppCompatActivity() {
     }
 
     // ═══════════════════════════════════════
-    // SOS Emergency (SMS + GPS)
+    // SOS — Foreground Service + SMS
     // ═══════════════════════════════════════
 
+    /**
+     * Toggle SOS tracking:
+     *   1st click → Start tracking + send SMS with live link
+     *   2nd click → Stop tracking
+     */
     private fun handleSosClick() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.SEND_SMS), SMS_PERMISSION_CODE); return
+        if (isTracking) {
+            stopSosTracking()
+            return
         }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), LOCATION_PERMISSION_CODE); return
+
+        // Check SMS permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.SEND_SMS), SMS_PERMISSION_CODE)
+            return
         }
+        // Check location permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), LOCATION_PERMISSION_CODE)
+            return
+        }
+        // Check notification permission (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_CODE)
+                return
+            }
+        }
+        // Check GPS
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
         if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            Toast.makeText(this, "⚠️ GPS is off! Enable GPS for SOS.", Toast.LENGTH_LONG).show(); return
+            Toast.makeText(this, "⚠️ GPS is off! Enable GPS for SOS.", Toast.LENGTH_LONG).show()
+            return
         }
-        Toast.makeText(this, "📡 Fetching location...", Toast.LENGTH_SHORT).show()
-        val ct = CancellationTokenSource()
-        fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, ct.token)
-            .addOnSuccessListener { loc ->
-                if (loc != null) sendSos(loc.latitude, loc.longitude)
-                else {
-                    val osm = locationOverlay?.myLocation
-                    if (osm != null) sendSos(osm.latitude, osm.longitude)
-                    else Toast.makeText(this, "❌ No GPS fix.", Toast.LENGTH_LONG).show()
-                }
-            }
-            .addOnFailureListener { Toast.makeText(this, "❌ ${it.message}", Toast.LENGTH_LONG).show() }
+
+        startSosTracking()
     }
 
-    private fun sendSos(lat: Double, lng: Double) {
+    private fun startSosTracking() {
+        val sosId = java.util.UUID.randomUUID().toString().take(8)
+        currentSosId = sosId
+
+        // 1. Start foreground service
+        val serviceIntent = Intent(this, com.bgi.pathfinder.service.SOSService::class.java).apply {
+            putExtra(com.bgi.pathfinder.service.SOSService.EXTRA_SOS_ID, sosId)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+
+        // 2. Update UI — FAB turns green
+        isTracking = true
+        fabSos.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            android.graphics.Color.parseColor("#4CAF50")
+        )
+
+        // 3. Send SMS with live tracking link
         try {
-            val msg = "EMERGENCY! I need help. My location: https://www.google.com/maps/search/?api=1&query=$lat,$lng"
+            val trackingUrl = "$TRACKING_BASE_URL/?id=$sosId"
+            val msg = "EMERGENCY! I need help. Track me LIVE: $trackingUrl"
             @Suppress("DEPRECATION") val sms = SmsManager.getDefault()
             val parts = sms.divideMessage(msg)
             sms.sendMultipartTextMessage(SOS_PHONE_NUMBER, null, parts, null, null)
-            Toast.makeText(this, "🆘 SOS Alert Sent!", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "🆘 SOS Active! SMS sent with live tracking link.", Toast.LENGTH_LONG).show()
+            android.util.Log.d("SOS", "✅ SMS sent: $trackingUrl")
         } catch (e: Exception) {
             Toast.makeText(this, "❌ SMS failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun stopSosTracking() {
+        // Stop foreground service
+        val serviceIntent = Intent(this, com.bgi.pathfinder.service.SOSService::class.java).apply {
+            action = com.bgi.pathfinder.service.SOSService.ACTION_STOP
+        }
+        startService(serviceIntent)
+
+        // Reset UI
+        isTracking = false
+        currentSosId = null
+        fabSos.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            android.graphics.Color.parseColor("#FF0000")
+        )
+        Toast.makeText(this, "✅ SOS tracking stopped.", Toast.LENGTH_SHORT).show()
     }
 }
