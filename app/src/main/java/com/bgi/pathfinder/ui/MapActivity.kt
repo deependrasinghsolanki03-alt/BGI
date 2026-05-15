@@ -67,6 +67,7 @@ class MapActivity : AppCompatActivity() {
 
     private var isTracking = false
     private var currentSosId: String? = null
+    private var sosTimerJob: Job? = null
 
     // Views
     private lateinit var mapView: MapView
@@ -85,6 +86,9 @@ class MapActivity : AppCompatActivity() {
     private lateinit var tvRouteBTime: TextView
     private lateinit var fabMyLocation: FloatingActionButton
     private lateinit var fabSos: FloatingActionButton
+    private lateinit var sosActiveCard: MaterialCardView
+    private lateinit var tvSosTimer: TextView
+    private lateinit var btnStopSos: MaterialButton
 
     // SOS — GPS
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -123,6 +127,7 @@ class MapActivity : AppCompatActivity() {
         btnFindRoutes.setOnClickListener { hideKeyboard(); findRoutes() }
         btnReset.setOnClickListener { resetAll() }
         fabSos.setOnClickListener { handleSosClick() }
+        btnStopSos.setOnClickListener { stopSosTracking() }
 
         requestLocationPermission()
     }
@@ -151,6 +156,9 @@ class MapActivity : AppCompatActivity() {
         tvRouteBTime = findViewById(R.id.tvRouteBTime)
         fabMyLocation = findViewById(R.id.fabMyLocation)
         fabSos = findViewById(R.id.fabSos)
+        sosActiveCard = findViewById(R.id.sosActiveCard)
+        tvSosTimer = findViewById(R.id.tvSosTimer)
+        btnStopSos = findViewById(R.id.btnStopSos)
     }
 
     // ═══════════════════════════════════════
@@ -573,11 +581,13 @@ class MapActivity : AppCompatActivity() {
             startService(serviceIntent)
         }
 
-        // 2. Update UI — FAB turns green
+        // 2. Update UI — FAB turns green + show banner
         isTracking = true
         fabSos.backgroundTintList = android.content.res.ColorStateList.valueOf(
             android.graphics.Color.parseColor("#4CAF50")
         )
+        sosActiveCard.visibility = View.VISIBLE
+        startSosCountdown()
 
         // 3. Send SMS with live tracking link
         try {
@@ -593,7 +603,30 @@ class MapActivity : AppCompatActivity() {
         }
     }
 
+    private fun startSosCountdown() {
+        sosTimerJob?.cancel()
+        sosTimerJob = lifecycleScope.launch {
+            var remaining = 300 // 5 minutes in seconds
+            while (remaining > 0 && isTracking) {
+                val min = remaining / 60
+                val sec = remaining % 60
+                tvSosTimer.text = "Time remaining: ${min}:${String.format("%02d", sec)}"
+                delay(1000)
+                remaining--
+            }
+            if (isTracking) {
+                // Auto-stop after 5 minutes
+                tvSosTimer.text = "⏰ Time expired — auto-stopped"
+                stopSosTracking()
+            }
+        }
+    }
+
     private fun stopSosTracking() {
+        // Stop countdown
+        sosTimerJob?.cancel()
+        sosTimerJob = null
+
         // Stop foreground service
         val serviceIntent = Intent(this, com.bgi.pathfinder.service.SOSService::class.java).apply {
             action = com.bgi.pathfinder.service.SOSService.ACTION_STOP
@@ -606,6 +639,7 @@ class MapActivity : AppCompatActivity() {
         fabSos.backgroundTintList = android.content.res.ColorStateList.valueOf(
             android.graphics.Color.parseColor("#FF0000")
         )
+        sosActiveCard.visibility = View.GONE
         Toast.makeText(this, "✅ SOS tracking stopped.", Toast.LENGTH_SHORT).show()
     }
 }
