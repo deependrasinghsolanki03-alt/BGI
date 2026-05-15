@@ -62,7 +62,7 @@ class MapActivity : AppCompatActivity() {
         private const val NOTIFICATION_PERMISSION_CODE = 1003
         private const val SOS_PHONE_NUMBER = "YOUR_TEST_NUMBER"
         // ⚠️ CHANGE to your deployed Vercel URL
-        private const val TRACKING_BASE_URL = "https://your-vercel-app.vercel.app"
+        private const val TRACKING_BASE_URL = "https://bgi-rust.vercel.app"
     }
 
     private var isTracking = false

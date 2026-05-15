@@ -23,8 +23,8 @@ object SupabaseClient {
     private const val TAG = "Supabase"
 
     // ⚠️ REPLACE with your Supabase project values
-    private const val SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
-    private const val SUPABASE_ANON_KEY = "YOUR_ANON_KEY"
+    private const val SUPABASE_URL = "https://gyjdbqmdoofkywmnxhyc.supabase.co"
+    private const val SUPABASE_ANON_KEY = "sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
