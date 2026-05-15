@@ -40,11 +40,13 @@ class SOSService : Service() {
         private const val CHANNEL_ID = "sos_tracking_channel"
         private const val NOTIFICATION_ID = 9911
         private const val LOCATION_INTERVAL_MS = 5000L
+        private const val MAX_TRACKING_MS = 5 * 60 * 1000L  // 5 minutes auto-stop
     }
 
     private lateinit var fusedClient: FusedLocationProviderClient
     private var locationCallback: LocationCallback? = null
     private var sosId: String = ""
+    private val autoStopHandler = android.os.Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onCreate() {
@@ -75,6 +77,12 @@ class SOSService : Service() {
         // Start GPS tracking
         startLocationUpdates()
 
+        // Auto-stop after 5 minutes
+        autoStopHandler.postDelayed({
+            Log.d(TAG, "⏰ 5 min timeout — auto-stopping SOS")
+            stopSelf()
+        }, MAX_TRACKING_MS)
+
         return START_STICKY
     }
 
@@ -82,6 +90,8 @@ class SOSService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Cancel auto-stop timer
+        autoStopHandler.removeCallbacksAndMessages(null)
         // Stop GPS updates
         locationCallback?.let { fusedClient.removeLocationUpdates(it) }
         locationCallback = null

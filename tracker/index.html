@@ -8,23 +8,31 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a1a; color: #fff; }
-        #map { width: 100%; height: 70vh; }
+        #map { width: 100%; height: 60vh; }
         .header {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             padding: 16px 20px;
-            display: flex; align-items: center; gap: 12px;
+            display: flex; align-items: center; justify-content: space-between;
             border-bottom: 2px solid #ff1744;
         }
+        .header-left { display: flex; align-items: center; gap: 12px; }
         .header .pulse {
             width: 12px; height: 12px; border-radius: 50%;
             background: #ff1744; animation: pulse 1.5s infinite;
         }
+        .pulse.stopped { background: #666; animation: none; }
         @keyframes pulse {
             0%, 100% { box-shadow: 0 0 0 0 rgba(255,23,68,0.7); }
             50% { box-shadow: 0 0 0 10px rgba(255,23,68,0); }
         }
         .header h1 { font-size: 18px; font-weight: 600; }
         .header .sos-id { color: #ff9800; font-size: 13px; }
+        .timer {
+            background: #ff1744; color: #fff; padding: 6px 14px;
+            border-radius: 20px; font-size: 14px; font-weight: 700;
+            font-family: monospace; letter-spacing: 1px;
+        }
+        .timer.expired { background: #555; }
         .info-bar {
             background: #1a1a2e; padding: 12px 20px;
             display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
@@ -41,15 +49,26 @@
             animation: spin 1s linear infinite; margin: 0 auto 20px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .expired-banner {
+            background: #333; text-align: center; padding: 16px;
+            font-size: 15px; color: #ff9800; display: none;
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="pulse"></div>
-        <div>
-            <h1>🆘 Live SOS Tracker</h1>
-            <div class="sos-id" id="sosLabel">Connecting...</div>
+        <div class="header-left">
+            <div class="pulse" id="pulseIcon"></div>
+            <div>
+                <h1>🆘 Live SOS Tracker</h1>
+                <div class="sos-id" id="sosLabel">Connecting...</div>
+            </div>
         </div>
+        <div class="timer" id="countdown">05:00</div>
+    </div>
+
+    <div class="expired-banner" id="expiredBanner">
+        ⏰ Tracking session expired (5 min limit). Last known location shown above.
     </div>
 
     <div id="mapContainer" style="display:none;">
@@ -58,6 +77,7 @@
             <div>📍 Lat: <span id="lat">--</span></div>
             <div>📍 Lng: <span id="lng">--</span></div>
             <div>🕐 Last update: <span id="time">--</span></div>
+            <div>📊 Updates: <span id="updateCount">0</span></div>
         </div>
     </div>
 
@@ -69,23 +89,58 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // ⚠️ REPLACE with your Supabase values
         const SUPABASE_URL = 'https://gyjdbqmdoofkywmnxhyc.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA';
+        const MAX_DURATION_SEC = 5 * 60; // 5 minutes
 
         const params = new URLSearchParams(window.location.search);
         const sosId = params.get('id');
+        let trackingActive = true;
+        let remainingSeconds = MAX_DURATION_SEC;
+        let updates = 0;
+        let pollTimer = null;
 
         if (!sosId) {
             document.getElementById('statusMsg').innerHTML = '<p style="color:#ff1744;">❌ No SOS ID provided in URL.</p>';
+            document.getElementById('countdown').style.display = 'none';
         } else {
             document.getElementById('sosLabel').textContent = `Session: ${sosId}`;
-            pollLocation();
+            startCountdown();
+            pollTimer = setTimeout(pollLocation, 0);
         }
 
         let map, marker, polyline;
         const trail = [];
 
+        // ── Countdown Timer ──
+        function startCountdown() {
+            updateCountdownDisplay();
+            const interval = setInterval(() => {
+                remainingSeconds--;
+                updateCountdownDisplay();
+                if (remainingSeconds <= 0) {
+                    clearInterval(interval);
+                    stopTracking();
+                }
+            }, 1000);
+        }
+
+        function updateCountdownDisplay() {
+            const min = Math.floor(remainingSeconds / 60);
+            const sec = remainingSeconds % 60;
+            document.getElementById('countdown').textContent =
+                `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+        }
+
+        function stopTracking() {
+            trackingActive = false;
+            document.getElementById('countdown').textContent = 'EXPIRED';
+            document.getElementById('countdown').classList.add('expired');
+            document.getElementById('pulseIcon').classList.add('stopped');
+            document.getElementById('expiredBanner').style.display = 'block';
+        }
+
+        // ── Map ──
         function initMap(lat, lng) {
             document.getElementById('mapContainer').style.display = 'block';
             document.getElementById('statusMsg').style.display = 'none';
@@ -111,12 +166,17 @@
             trail.push([lat, lng]);
             polyline.setLatLngs(trail);
 
+            updates++;
             document.getElementById('lat').textContent = lat.toFixed(6);
             document.getElementById('lng').textContent = lng.toFixed(6);
             document.getElementById('time').textContent = new Date().toLocaleTimeString();
+            document.getElementById('updateCount').textContent = updates;
         }
 
+        // ── Polling ──
         async function pollLocation() {
+            if (!trackingActive) return; // Stop polling when expired
+
             try {
                 const url = `${SUPABASE_URL}/rest/v1/locations?sos_id=eq.${sosId}&order=id.desc&limit=1`;
                 const res = await fetch(url, {
@@ -132,8 +192,10 @@
             } catch (e) {
                 console.error('Poll error:', e);
             }
-            // Poll every 5 seconds
-            setTimeout(pollLocation, 5000);
+            // Continue polling every 5 seconds
+            if (trackingActive) {
+                pollTimer = setTimeout(pollLocation, 5000);
+            }
         }
     </script>
 </body>
