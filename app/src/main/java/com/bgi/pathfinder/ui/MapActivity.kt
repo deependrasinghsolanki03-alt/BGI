@@ -61,6 +61,15 @@ class MapActivity : AppCompatActivity() {
         private const val SMS_PERMISSION_CODE = 1002
         // ⚠️ CHANGE THIS to the actual emergency contact number!
         private const val SOS_PHONE_NUMBER = "YOUR_TEST_NUMBER"
+
+        // ⚠️ Supabase Config — Get these from: https://supabase.com → Project Settings → API
+        private const val SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co"
+        private const val SUPABASE_ANON_KEY = "YOUR_ANON_KEY"
+
+        // ⚠️ Tracking page URL — where your track.html is hosted
+        // For testing via your backend: "http://<laptop-ip>:3000/track.html"
+        // For production: "https://your-app.vercel.app/track.html"
+        private const val TRACKING_BASE_URL = "http://10.217.209.31:3000/track.html"
     }
 
     // ═══════════════════════════════════════
@@ -85,6 +94,12 @@ class MapActivity : AppCompatActivity() {
 
     // SOS — Google Play Services Fused Location (most accurate)
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+
+    // SOS Live Tracking — Supabase Realtime Broadcast
+    private var supabaseClient: com.bgi.pathfinder.network.SupabaseRealtimeClient? = null
+    private var sosSessionId: String? = null
+    private var isTracking = false
+    private var locationCallback: com.google.android.gms.location.LocationCallback? = null
 
     // Adapters
     private lateinit var startAdapter: SearchResultAdapter
@@ -716,98 +731,153 @@ class MapActivity : AppCompatActivity() {
     }
 
     // ═══════════════════════════════════════
-    // SOS Emergency Feature
+    // SOS Live Tracking (Supabase Realtime)
     // ═══════════════════════════════════════
 
     /**
-     * Handle SOS button click:
-     *  1. Check SMS + Location permissions
-     *  2. Fetch current GPS coordinates via FusedLocationProviderClient
-     *  3. Send background SMS with Google Maps link
+     * SOS button toggles live tracking on/off:
+     *   1st click → Start tracking + send SMS with live tracking link
+     *   2nd click → Stop tracking
      */
     private fun handleSosClick() {
-        // Step 1: Check SMS permission
+        if (isTracking) {
+            stopSosTracking()
+            return
+        }
+
+        // ── Permission checks ──
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS)
             != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.SEND_SMS),
-                SMS_PERMISSION_CODE
+                this, arrayOf(Manifest.permission.SEND_SMS), SMS_PERMISSION_CODE
             )
             return
         }
-
-        // Step 2: Check location permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                LOCATION_PERMISSION_CODE
+                this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), LOCATION_PERMISSION_CODE
             )
             return
         }
 
-        // Step 3: Check if GPS is enabled
+        // ── GPS check ──
         val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            Toast.makeText(this, "⚠️ GPS is turned off! Please enable GPS for SOS.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "⚠️ GPS is turned off! Enable GPS for SOS.", Toast.LENGTH_LONG).show()
             return
         }
 
-        Toast.makeText(this, "📡 Fetching your location...", Toast.LENGTH_SHORT).show()
-
-        // Step 4: Get current location using FusedLocationProviderClient
-        val cancellationToken = CancellationTokenSource()
-        fusedLocationClient.getCurrentLocation(
-            Priority.PRIORITY_HIGH_ACCURACY,
-            cancellationToken.token
-        ).addOnSuccessListener { location ->
-            if (location != null) {
-                sendSosMessage(location.latitude, location.longitude)
-            } else {
-                // Fallback: Try OSMDroid's last known location
-                val osmLoc = locationOverlay?.myLocation
-                if (osmLoc != null) {
-                    sendSosMessage(osmLoc.latitude, osmLoc.longitude)
-                } else {
-                    Toast.makeText(this, "❌ Could not get GPS fix. Move to an open area.", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.addOnFailureListener { e ->
-            android.util.Log.e("SOS", "Location fetch failed: ${e.message}")
-            Toast.makeText(this, "❌ Location error: ${e.message}", Toast.LENGTH_LONG).show()
-        }
+        startSosTracking()
     }
 
     /**
-     * Send emergency SMS with Google Maps link in the background.
+     * Start live SOS tracking:
+     *  1. Generate unique session UUID
+     *  2. Connect to Supabase Realtime channel
+     *  3. Start GPS updates every 5 seconds
+     *  4. Send SMS with live tracking link
      */
-    private fun sendSosMessage(lat: Double, lng: Double) {
+    private fun startSosTracking() {
+        val sessionId = java.util.UUID.randomUUID().toString().take(8)
+        sosSessionId = sessionId
+        val channelName = "sos-$sessionId"
+
+        android.util.Log.d("SOS", "🆘 Starting live tracking | Session: $channelName")
+
+        // 1. Connect to Supabase Realtime
+        supabaseClient = com.bgi.pathfinder.network.SupabaseRealtimeClient(
+            SUPABASE_URL, SUPABASE_ANON_KEY
+        )
+        supabaseClient?.connect(channelName)
+
+        // 2. Start location updates every 5 seconds
+        val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY, 5000L
+        ).setMinUpdateIntervalMillis(3000L).build()
+
+        locationCallback = object : com.google.android.gms.location.LocationCallback() {
+            override fun onLocationResult(result: com.google.android.gms.location.LocationResult) {
+                val loc = result.lastLocation ?: return
+                supabaseClient?.broadcastLocation(
+                    loc.latitude, loc.longitude, System.currentTimeMillis()
+                )
+            }
+        }
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            fusedLocationClient.requestLocationUpdates(
+                locationRequest, locationCallback!!, mainLooper
+            )
+        }
+
+        // 3. Update UI — FAB turns green to show "tracking active"
+        isTracking = true
+        fabSos.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            Color.parseColor("#4CAF50")
+        )
+        Toast.makeText(this, "🆘 Live tracking started! Sending SMS...", Toast.LENGTH_SHORT).show()
+
+        // 4. Send SMS with live tracking link (after short delay for WebSocket to connect)
+        android.os.Handler(mainLooper).postDelayed({
+            sendTrackingSms(sessionId)
+        }, 2000)
+    }
+
+    /**
+     * Stop live SOS tracking.
+     */
+    private fun stopSosTracking() {
+        // Stop location updates
+        locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
+        locationCallback = null
+
+        // Disconnect Supabase WebSocket
+        supabaseClient?.disconnect()
+        supabaseClient = null
+        sosSessionId = null
+
+        // Reset UI — FAB back to red
+        isTracking = false
+        fabSos.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            Color.parseColor("#FF0000")
+        )
+        Toast.makeText(this, "✅ SOS tracking stopped.", Toast.LENGTH_SHORT).show()
+        android.util.Log.d("SOS", "🔌 Live tracking stopped")
+    }
+
+    /**
+     * Send SMS with live tracking URL.
+     */
+    private fun sendTrackingSms(sessionId: String) {
         try {
-            val mapLink = "https://www.google.com/maps/search/?api=1&query=$lat,$lng"
-            val message = "EMERGENCY! I need help. My current location is: $mapLink"
+            val trackingLink = "$TRACKING_BASE_URL?id=sos-$sessionId"
+            val message = "EMERGENCY! I need help. Track my LIVE location: $trackingLink"
 
             @Suppress("DEPRECATION")
             val smsManager = SmsManager.getDefault()
-
-            // SMS has a 160-char limit; split if needed
             val parts = smsManager.divideMessage(message)
             smsManager.sendMultipartTextMessage(
-                SOS_PHONE_NUMBER,
-                null,
-                parts,
-                null,
-                null
+                SOS_PHONE_NUMBER, null, parts, null, null
             )
 
-            android.util.Log.d("SOS", "✅ SOS sent to $SOS_PHONE_NUMBER | Location: $lat, $lng")
-            Toast.makeText(this, "🆘 SOS Alert Sent Successfully!", Toast.LENGTH_LONG).show()
+            android.util.Log.d("SOS", "✅ SMS sent: $trackingLink")
+            Toast.makeText(this, "🆘 SOS Alert Sent! Link: $trackingLink", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            android.util.Log.e("SOS", "Failed to send SMS: ${e.message}")
-            Toast.makeText(this, "❌ Failed to send SOS: ${e.message}", Toast.LENGTH_LONG).show()
+            android.util.Log.e("SOS", "SMS failed: ${e.message}")
+            Toast.makeText(this, "❌ Failed to send SMS: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clean up tracking if activity is destroyed
+        if (isTracking) stopSosTracking()
+        if (::hybridOverlay.isInitialized) hybridOverlay.destroy()
+    }
 }
+
