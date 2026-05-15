@@ -75,10 +75,6 @@ const apiKeyAuth = (req, res, next) => {
   next();
 };
 
-// ── Static Files (SOS Tracking Page) ──
-const path = require("path");
-app.use(express.static(path.join(__dirname, "public")));
-
 // ── Routes ──
 // v0: JSON API (original)
 app.use("/api/map", apiKeyAuth, spatialLimiter, mapRoutes);
