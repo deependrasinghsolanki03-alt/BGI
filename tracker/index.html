@@ -53,6 +53,14 @@
             background: #333; text-align: center; padding: 16px;
             font-size: 15px; color: #ff9800; display: none;
         }
+        .stop-btn {
+            display: block; width: calc(100% - 40px); margin: 12px auto;
+            padding: 14px; border: none; border-radius: 12px;
+            background: #ff1744; color: #fff; font-size: 16px; font-weight: 700;
+            cursor: pointer; letter-spacing: 1px;
+        }
+        .stop-btn:hover { background: #d50000; }
+        .stop-btn:disabled { background: #555; cursor: default; }
     </style>
 </head>
 <body>
@@ -79,6 +87,7 @@
             <div>🕐 Last update: <span id="time">--</span></div>
             <div>📊 Updates: <span id="updateCount">0</span></div>
         </div>
+        <button class="stop-btn" id="btnStop" onclick="manualStop()">🛑 Stop Tracking</button>
     </div>
 
     <div class="status" id="statusMsg">
@@ -134,10 +143,17 @@
 
         function stopTracking() {
             trackingActive = false;
-            document.getElementById('countdown').textContent = 'EXPIRED';
+            document.getElementById('countdown').textContent = 'STOPPED';
             document.getElementById('countdown').classList.add('expired');
             document.getElementById('pulseIcon').classList.add('stopped');
             document.getElementById('expiredBanner').style.display = 'block';
+            document.getElementById('btnStop').disabled = true;
+            document.getElementById('btnStop').textContent = '✅ Tracking Stopped';
+        }
+
+        function manualStop() {
+            stopTracking();
+            document.getElementById('expiredBanner').textContent = '🛑 Tracking stopped manually. Last known location shown above.';
         }
 
         // ── Map ──
