@@ -205,13 +205,20 @@ async function buildGraphFromOsm(bbox, lod) {
 
       const dist = haversineMeters(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
 
+      const onewayVal = way.tags?.oneway;
+      const isOneWay = onewayVal === "yes" || onewayVal === "true" || onewayVal === "1";
+      const isReverse = onewayVal === "-1";
+
+      const finalFromId = isReverse ? toId : fromId;
+      const finalToId = isReverse ? fromId : toId;
+
       edges.push({
-        startNode: String(fromId),
-        endNode: String(toId),
+        startNode: String(finalFromId),
+        endNode: String(finalToId),
         distance: parseFloat(dist.toFixed(2)),
         roadType: highway,
         speedKmh,
-        isOneWay,
+        isOneWay: isOneWay || isReverse,
         trafficMultiplier: 1.0,
         roadQualityMultiplier: 1.0,
         name: roadName,

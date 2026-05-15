@@ -31,7 +31,7 @@ object RetrofitClient {
     // Emulator    → "http://10.0.2.2:3000/"
     // Hotspot     → "http://<YOUR_LAPTOP_IP>:3000/"
     // Production  → "https://your-server.com/"
-    private const val BASE_URL = "http://10.133.55.31:3000/"
+    private const val BASE_URL = "http://10.217.209.31:3000/"
 
     // Set this if you enabled API_KEY in backend .env
     // Leave empty for open access

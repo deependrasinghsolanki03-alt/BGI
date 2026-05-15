@@ -45,7 +45,7 @@ function calculateDiagonalKm(lat1, lng1, lat2, lng2) {
  * (avoids adding unnecessary $in filter to MongoDB query).
  */
 function getLodTier(diagonalKm) {
-  if (diagonalKm < 5) {
+  if (diagonalKm < 15) {
     return {
       tier: "HIGH",
       allowedRoadTypes: null, // No filter — fetch everything
@@ -53,7 +53,7 @@ function getLodTier(diagonalKm) {
     };
   }
 
-  if (diagonalKm <= 15) {
+  if (diagonalKm <= 30) {
     return {
       tier: "MEDIUM",
       allowedRoadTypes: [
@@ -62,8 +62,9 @@ function getLodTier(diagonalKm) {
         "primary", "primary_link",
         "secondary", "secondary_link",
         "tertiary", "tertiary_link",
+        "residential", "unclassified", "service"
       ],
-      description: "Major + secondary roads (no residential/service)",
+      description: "Major + secondary + residential roads (no footways/paths)",
     };
   }
 

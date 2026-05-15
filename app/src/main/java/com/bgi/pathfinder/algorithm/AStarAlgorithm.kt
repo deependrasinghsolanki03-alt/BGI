@@ -35,8 +35,11 @@ class AStarAlgorithm(private val graph: Graph) {
         val goalNode = graph.getNode(goalId)
 
         if (startNode == null || goalNode == null) {
+            android.util.Log.e("AStar", "Failed to start A*: Start or Goal node is null ($startId -> $goalId)")
             return emptyResult(startTime)
         }
+
+        android.util.Log.d("AStar", "Starting A* search from ${startNode.id} to ${goalNode.id} using mode: $mode")
 
         val openSet = PriorityQueue<AStarNode>()
         val closedSet = mutableSetOf<String>()
@@ -54,6 +57,7 @@ class AStarAlgorithm(private val graph: Graph) {
             nodesExplored++
 
             if (current.nodeId == goalId) {
+                android.util.Log.d("AStar", "✅ Path Found! Nodes explored: $nodesExplored")
                 val path = reconstructPath(parentMap, goalId)
                 val (totalDist, totalTime) = calculateDistanceAndTime(path)
                 return PathResult(
@@ -90,6 +94,7 @@ class AStarAlgorithm(private val graph: Graph) {
             }
         }
 
+        android.util.Log.w("AStar", "❌ A* failed. Explored $nodesExplored nodes but could not reach ${goalNode.id}")
         return emptyResult(startTime, nodesExplored)
     }
 

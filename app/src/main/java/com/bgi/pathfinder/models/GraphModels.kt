@@ -74,7 +74,7 @@ class Graph {
     fun isEmpty(): Boolean = nodes.isEmpty()
 
     /** Find the nearest graph node to a coordinate (within maxRadius meters) */
-    fun findNearestNode(lat: Double, lng: Double, maxRadius: Double = 1000.0): Node? {
+    fun findNearestNode(lat: Double, lng: Double, maxRadius: Double = 5000.0): Node? {
         var nearest: Node? = null
         var minDist = Double.MAX_VALUE
         for (node in nodes.values) {

@@ -356,11 +356,50 @@ class MapActivity : AppCompatActivity() {
     // Search — 100% LOCAL (no Nominatim)
     // ═══════════════════════════════════════
 
+    private lateinit var startTextWatcher: TextWatcher
+    private lateinit var endTextWatcher: TextWatcher
+
     private fun setupSearch() {
+        startTextWatcher = createSearchWatcher { query ->
+            startSearchJob?.cancel()
+            startSearchJob = lifecycleScope.launch {
+                delay(300)
+                val loc = getUserLocation()
+                val results = LocalSearchService.search(query, loc?.first, loc?.second)
+                if (results.isNotEmpty() && etStartSearch.hasFocus()) {
+                    startAdapter.updateResults(results)
+                    rvStartResults.visibility = View.VISIBLE
+                } else {
+                    rvStartResults.visibility = View.GONE
+                }
+            }
+        }
+
+        endTextWatcher = createSearchWatcher { query ->
+            endSearchJob?.cancel()
+            endSearchJob = lifecycleScope.launch {
+                delay(300)
+                val loc = getUserLocation()
+                val results = LocalSearchService.search(query, loc?.first, loc?.second)
+                if (results.isNotEmpty() && etEndSearch.hasFocus()) {
+                    endAdapter.updateResults(results)
+                    rvEndResults.visibility = View.VISIBLE
+                } else {
+                    rvEndResults.visibility = View.GONE
+                }
+            }
+        }
+
         // Start location search
         startAdapter = SearchResultAdapter { result ->
             startPoint = GeoPoint(result.lat, result.lon)
+            
+            // Temporarily remove watcher to prevent API call
+            etStartSearch.removeTextChangedListener(startTextWatcher)
             etStartSearch.setText(result.displayName.take(50))
+            etStartSearch.addTextChangedListener(startTextWatcher)
+            
+            etStartSearch.clearFocus()
             rvStartResults.visibility = View.GONE
             addMarker(startPoint!!, "START", Color.parseColor("#4CAF50"))
             mapView.controller.animateTo(startPoint)
@@ -370,26 +409,18 @@ class MapActivity : AppCompatActivity() {
         }
         rvStartResults.layoutManager = LinearLayoutManager(this)
         rvStartResults.adapter = startAdapter
-
-        etStartSearch.addTextChangedListener(createSearchWatcher { query ->
-            startSearchJob?.cancel()
-            startSearchJob = lifecycleScope.launch {
-                delay(300) // 300ms debounce — fast yet prevents keystroke flooding
-                val loc = getUserLocation()
-                val results = LocalSearchService.search(query, loc?.first, loc?.second)
-                if (results.isNotEmpty()) {
-                    startAdapter.updateResults(results)
-                    rvStartResults.visibility = View.VISIBLE
-                } else {
-                    rvStartResults.visibility = View.GONE
-                }
-            }
-        })
+        etStartSearch.addTextChangedListener(startTextWatcher)
 
         // End location search
         endAdapter = SearchResultAdapter { result ->
             endPoint = GeoPoint(result.lat, result.lon)
+            
+            // Temporarily remove watcher to prevent API call
+            etEndSearch.removeTextChangedListener(endTextWatcher)
             etEndSearch.setText(result.displayName.take(50))
+            etEndSearch.addTextChangedListener(endTextWatcher)
+            
+            etEndSearch.clearFocus()
             rvEndResults.visibility = View.GONE
             addMarker(endPoint!!, "END", Color.parseColor("#F44336"))
             mapView.controller.animateTo(endPoint)
@@ -398,21 +429,7 @@ class MapActivity : AppCompatActivity() {
         }
         rvEndResults.layoutManager = LinearLayoutManager(this)
         rvEndResults.adapter = endAdapter
-
-        etEndSearch.addTextChangedListener(createSearchWatcher { query ->
-            endSearchJob?.cancel()
-            endSearchJob = lifecycleScope.launch {
-                delay(300) // 300ms debounce
-                val loc = getUserLocation()
-                val results = LocalSearchService.search(query, loc?.first, loc?.second)
-                if (results.isNotEmpty()) {
-                    endAdapter.updateResults(results)
-                    rvEndResults.visibility = View.VISIBLE
-                } else {
-                    rvEndResults.visibility = View.GONE
-                }
-            }
-        })
+        etEndSearch.addTextChangedListener(endTextWatcher)
     }
 
     /**
@@ -466,6 +483,15 @@ class MapActivity : AppCompatActivity() {
             Toast.makeText(this, "Points are ${String.format("%.1f", distKm)}km apart. Max ~50km with LOD.", Toast.LENGTH_LONG).show()
         }
 
+        // DYNAMIC GRAPH FETCHING: Adjust padding based on distance
+        // A short trip (2km) gets small padding (1.5), while a long trip (30km) gets larger padding (3.0) 
+        // to ensure alternative routes outside the direct bounding box are fetched.
+        val dynamicPadding = when {
+            distKm > 20.0 -> 3.0
+            distKm > 5.0 -> 2.5
+            else -> 1.5
+        }
+
         btnFindRoutes.isEnabled = false
         showLoading("Fetching road network...")
 
@@ -473,9 +499,11 @@ class MapActivity : AppCompatActivity() {
             try {
                 val result = mapRepository.fetchRouteGraph(
                     start.latitude, start.longitude,
-                    end.latitude, end.longitude
+                    end.latitude, end.longitude,
+                    dynamicPadding
                 )
                 val graph = result.graph
+                android.util.Log.d("MapActivity", "AStar Setup: Fetched graph with ${graph.nodeCount()} nodes and ${graph.edgeCount()} edges (padding=$dynamicPadding)")
 
                 val sizeKB = result.sizeBytes / 1024
                 showLoading("Via ${result.source} (${sizeKB}KB, ${result.decodeTimeMs}ms)")
@@ -498,6 +526,27 @@ class MapActivity : AppCompatActivity() {
                     btnFindRoutes.isEnabled = true
                     return@launch
                 }
+
+                // ── DEBUG OVERLAY: Draw small dots where it actually snapped ──
+                val startSnap = Marker(mapView).apply {
+                    position = GeoPoint(startNode.lat, startNode.lng)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    title = "Snapped Start"
+                    icon = createCircleDrawable(Color.YELLOW, 12f, Color.BLACK, 3f)
+                    setOnMarkerClickListener { _, _ -> false }
+                }
+                val endSnap = Marker(mapView).apply {
+                    position = GeoPoint(endNode.lat, endNode.lng)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    title = "Snapped End"
+                    icon = createCircleDrawable(Color.parseColor("#FFA500"), 12f, Color.BLACK, 3f)
+                    setOnMarkerClickListener { _, _ -> false }
+                }
+                mapView.overlays.add(startSnap)
+                mapView.overlays.add(endSnap)
+                markers.add(startSnap)
+                markers.add(endSnap)
+                // ──────────────────────────────────────────────────────────────
 
                 showLoading("Running A★ pathfinding...")
 
@@ -618,12 +667,24 @@ class MapActivity : AppCompatActivity() {
 
     private fun resetAll() {
         startPoint = null; endPoint = null
+        
+        // Prevent API calls when clearing text
+        etStartSearch.removeTextChangedListener(startTextWatcher)
+        etEndSearch.removeTextChangedListener(endTextWatcher)
+        
         etStartSearch.text.clear(); etEndSearch.text.clear()
+        
+        etStartSearch.addTextChangedListener(startTextWatcher)
+        etEndSearch.addTextChangedListener(endTextWatcher)
+        
+        etStartSearch.clearFocus(); etEndSearch.clearFocus()
+        
         rvStartResults.visibility = View.GONE; rvEndResults.visibility = View.GONE
         markers.forEach { mapView.overlays.remove(it) }; markers.clear()
         routePolylines.forEach { mapView.overlays.remove(it) }; routePolylines.clear()
         bottomPanel.visibility = View.GONE
         btnFindRoutes.isEnabled = false
+        hideKeyboard()
         mapView.invalidate()
     }
 
