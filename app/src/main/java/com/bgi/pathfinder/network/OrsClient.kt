@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 object OrsClient {
 
     // ⚠️ REPLACE with your own ORS API key!
-    private const val ORS_API_KEY = "5b3ce3597851110001cf6248a3c0c0e0b1d34e6b8d5f0e7a9c2d1f3b"
+    private const val ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjU2YjkyN2Q2MDNjZDQ2MTU4MGVkNmU3M2FmYjI5OWU3IiwiaCI6Im11cm11cjY0In0="
     private const val BASE_URL = "https://api.openrouteservice.org/"
 
     private val okHttpClient: OkHttpClient by lazy {
