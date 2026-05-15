@@ -63,8 +63,8 @@ class MapActivity : AppCompatActivity() {
         private const val SOS_PHONE_NUMBER = "YOUR_TEST_NUMBER"
 
         // ⚠️ Supabase Config — Get these from: https://supabase.com → Project Settings → API
-        private const val SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co"
-        private const val SUPABASE_ANON_KEY = "YOUR_ANON_KEY"
+        private const val SUPABASE_URL = "https://gyjdbqmdoofkywmnxhyc.supabase.co"
+        private const val SUPABASE_ANON_KEY = "sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA"
 
         // ⚠️ Tracking page URL — where your track.html is hosted
         // For testing via your backend: "http://<laptop-ip>:3000/track.html"
