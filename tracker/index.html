@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🆘 Live SOS Tracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0a1a; color: #fff; }
+        #map { width: 100%; height: 70vh; }
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 16px 20px;
+            display: flex; align-items: center; gap: 12px;
+            border-bottom: 2px solid #ff1744;
+        }
+        .header .pulse {
+            width: 12px; height: 12px; border-radius: 50%;
+            background: #ff1744; animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255,23,68,0.7); }
+            50% { box-shadow: 0 0 0 10px rgba(255,23,68,0); }
+        }
+        .header h1 { font-size: 18px; font-weight: 600; }
+        .header .sos-id { color: #ff9800; font-size: 13px; }
+        .info-bar {
+            background: #1a1a2e; padding: 12px 20px;
+            display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+            font-size: 13px; color: #b0bec5;
+        }
+        .info-bar span { color: #64ffda; font-weight: 600; }
+        .status {
+            text-align: center; padding: 60px 20px;
+            font-size: 16px; color: #78909c;
+        }
+        .status .spinner {
+            width: 40px; height: 40px; border: 4px solid #333;
+            border-top-color: #ff1744; border-radius: 50%;
+            animation: spin 1s linear infinite; margin: 0 auto 20px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="pulse"></div>
+        <div>
+            <h1>🆘 Live SOS Tracker</h1>
+            <div class="sos-id" id="sosLabel">Connecting...</div>
+        </div>
+    </div>
+
+    <div id="mapContainer" style="display:none;">
+        <div id="map"></div>
+        <div class="info-bar">
+            <div>📍 Lat: <span id="lat">--</span></div>
+            <div>📍 Lng: <span id="lng">--</span></div>
+            <div>🕐 Last update: <span id="time">--</span></div>
+        </div>
+    </div>
+
+    <div class="status" id="statusMsg">
+        <div class="spinner"></div>
+        <p>Waiting for location data...</p>
+        <p style="margin-top:8px;font-size:13px;">The person's GPS will appear here shortly.</p>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // ⚠️ REPLACE with your Supabase values
+        const SUPABASE_URL = 'https://YOUR_PROJECT.supabase.co';
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+
+        const params = new URLSearchParams(window.location.search);
+        const sosId = params.get('id');
+
+        if (!sosId) {
+            document.getElementById('statusMsg').innerHTML = '<p style="color:#ff1744;">❌ No SOS ID provided in URL.</p>';
+        } else {
+            document.getElementById('sosLabel').textContent = `Session: ${sosId}`;
+            pollLocation();
+        }
+
+        let map, marker, polyline;
+        const trail = [];
+
+        function initMap(lat, lng) {
+            document.getElementById('mapContainer').style.display = 'block';
+            document.getElementById('statusMsg').style.display = 'none';
+
+            map = L.map('map').setView([lat, lng], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+
+            marker = L.marker([lat, lng]).addTo(map)
+                .bindPopup('🆘 Live Location').openPopup();
+
+            polyline = L.polyline([], { color: '#ff1744', weight: 3 }).addTo(map);
+        }
+
+        function updateMap(lat, lng) {
+            if (!map) {
+                initMap(lat, lng);
+            } else {
+                marker.setLatLng([lat, lng]);
+                map.panTo([lat, lng]);
+            }
+            trail.push([lat, lng]);
+            polyline.setLatLngs(trail);
+
+            document.getElementById('lat').textContent = lat.toFixed(6);
+            document.getElementById('lng').textContent = lng.toFixed(6);
+            document.getElementById('time').textContent = new Date().toLocaleTimeString();
+        }
+
+        async function pollLocation() {
+            try {
+                const url = `${SUPABASE_URL}/rest/v1/locations?sos_id=eq.${sosId}&order=id.desc&limit=1`;
+                const res = await fetch(url, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    }
+                });
+                const data = await res.json();
+                if (data.length > 0) {
+                    updateMap(data[0].lat, data[0].lng);
+                }
+            } catch (e) {
+                console.error('Poll error:', e);
+            }
+            // Poll every 5 seconds
+            setTimeout(pollLocation, 5000);
+        }
+    </script>
+</body>
+</html>
