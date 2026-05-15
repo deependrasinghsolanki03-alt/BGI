@@ -11,6 +11,7 @@ import android.graphics.Paint
 import android.graphics.drawable.BitmapDrawable
 import android.location.LocationManager
 import android.os.Bundle
+import android.telephony.SmsManager
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -31,6 +32,10 @@ import com.bgi.pathfinder.models.*
 import com.bgi.pathfinder.network.LocalSearchService
 import com.bgi.pathfinder.network.MapRepository
 import com.bgi.pathfinder.utils.PolylineSimplifier
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -53,6 +58,9 @@ class MapActivity : AppCompatActivity() {
 
     companion object {
         private const val LOCATION_PERMISSION_CODE = 1001
+        private const val SMS_PERMISSION_CODE = 1002
+        // ⚠️ CHANGE THIS to the actual emergency contact number!
+        private const val SOS_PHONE_NUMBER = "YOUR_TEST_NUMBER"
     }
 
     // ═══════════════════════════════════════
@@ -73,6 +81,10 @@ class MapActivity : AppCompatActivity() {
     private lateinit var tvRouteBDist: TextView
     private lateinit var tvRouteBTime: TextView
     private lateinit var fabMyLocation: FloatingActionButton
+    private lateinit var fabSos: FloatingActionButton
+
+    // SOS — Google Play Services Fused Location (most accurate)
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
 
     // Adapters
     private lateinit var startAdapter: SearchResultAdapter
@@ -118,8 +130,12 @@ class MapActivity : AppCompatActivity() {
         checkBackendAvailability()
         requestLocationPermission()
 
+        // SOS — Initialize FusedLocationProviderClient
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
         btnFindRoutes.setOnClickListener { findRoutes() }
         btnReset.setOnClickListener { resetAll() }
+        fabSos.setOnClickListener { handleSosClick() }
 
         // Show "Connecting..." spinner on startup
         showLoading("Connecting to local database...")
@@ -164,6 +180,7 @@ class MapActivity : AppCompatActivity() {
         tvRouteBDist = findViewById(R.id.tvRouteBDist)
         tvRouteBTime = findViewById(R.id.tvRouteBTime)
         fabMyLocation = findViewById(R.id.fabMyLocation)
+        fabSos = findViewById(R.id.fabSos)
     }
 
     /**
@@ -696,5 +713,101 @@ class MapActivity : AppCompatActivity() {
     private fun formatTime(min: Double): String {
         val h = min.toInt() / 60; val m = min.toInt() % 60
         return if (h > 0) "${h}h ${m}min" else "${m} min"
+    }
+
+    // ═══════════════════════════════════════
+    // SOS Emergency Feature
+    // ═══════════════════════════════════════
+
+    /**
+     * Handle SOS button click:
+     *  1. Check SMS + Location permissions
+     *  2. Fetch current GPS coordinates via FusedLocationProviderClient
+     *  3. Send background SMS with Google Maps link
+     */
+    private fun handleSosClick() {
+        // Step 1: Check SMS permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.SEND_SMS),
+                SMS_PERMISSION_CODE
+            )
+            return
+        }
+
+        // Step 2: Check location permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                LOCATION_PERMISSION_CODE
+            )
+            return
+        }
+
+        // Step 3: Check if GPS is enabled
+        val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            Toast.makeText(this, "⚠️ GPS is turned off! Please enable GPS for SOS.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        Toast.makeText(this, "📡 Fetching your location...", Toast.LENGTH_SHORT).show()
+
+        // Step 4: Get current location using FusedLocationProviderClient
+        val cancellationToken = CancellationTokenSource()
+        fusedLocationClient.getCurrentLocation(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            cancellationToken.token
+        ).addOnSuccessListener { location ->
+            if (location != null) {
+                sendSosMessage(location.latitude, location.longitude)
+            } else {
+                // Fallback: Try OSMDroid's last known location
+                val osmLoc = locationOverlay?.myLocation
+                if (osmLoc != null) {
+                    sendSosMessage(osmLoc.latitude, osmLoc.longitude)
+                } else {
+                    Toast.makeText(this, "❌ Could not get GPS fix. Move to an open area.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.addOnFailureListener { e ->
+            android.util.Log.e("SOS", "Location fetch failed: ${e.message}")
+            Toast.makeText(this, "❌ Location error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Send emergency SMS with Google Maps link in the background.
+     */
+    private fun sendSosMessage(lat: Double, lng: Double) {
+        try {
+            val mapLink = "https://www.google.com/maps/search/?api=1&query=$lat,$lng"
+            val message = "EMERGENCY! I need help. My current location is: $mapLink"
+
+            @Suppress("DEPRECATION")
+            val smsManager = SmsManager.getDefault()
+
+            // SMS has a 160-char limit; split if needed
+            val parts = smsManager.divideMessage(message)
+            smsManager.sendMultipartTextMessage(
+                SOS_PHONE_NUMBER,
+                null,
+                parts,
+                null,
+                null
+            )
+
+            android.util.Log.d("SOS", "✅ SOS sent to $SOS_PHONE_NUMBER | Location: $lat, $lng")
+            Toast.makeText(this, "🆘 SOS Alert Sent Successfully!", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            android.util.Log.e("SOS", "Failed to send SMS: ${e.message}")
+            Toast.makeText(this, "❌ Failed to send SOS: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 }

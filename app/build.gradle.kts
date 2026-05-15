@@ -58,6 +58,9 @@ dependencies {
     // Lifecycle (for lifecycleScope)
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 
+    // Google Play Services Location (for SOS FAB — FusedLocationProviderClient)
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

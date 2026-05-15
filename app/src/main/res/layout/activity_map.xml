@@ -260,6 +260,21 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
+    <!-- SOS Emergency FAB -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabSos"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        android:src="@android:drawable/ic_dialog_alert"
+        android:contentDescription="SOS Emergency"
+        app:backgroundTint="#FF0000"
+        app:tint="#FFFFFF"
+        app:fabSize="normal"
+        app:layout_constraintBottom_toTopOf="@+id/fabMyLocation"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="8dp" />
+
     <!-- My Location FAB -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabMyLocation"
