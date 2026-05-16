@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🆘 SOS Emergency Dashboard</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a1a; color: #fff; height: 100vh; overflow: hidden; }
@@ -55,6 +54,8 @@
         .msg.web { align-self: flex-end; background: #3f51b5; color: #fff; border-bottom-right-radius: 4px; }
         .msg .label { font-size: 10px; color: #888; margin-bottom: 4px; }
         .msg audio { width: 100%; margin-top: 6px; }
+        .status-bar { padding: 6px 16px; background: #1a1a2e; text-align: center; font-size: 11px; color: #4caf50; border-bottom: 1px solid #2a2a4a; }
+        .status-bar.err { color: #ff5252; }
 
         .chat-input {
             padding: 10px; background: #1a1a2e; border-top: 1px solid #2a2a4a;
@@ -109,9 +110,8 @@
     <!-- RIGHT: Chat -->
     <div class="chat-pane">
         <div class="chat-header">💬 Emergency Chat</div>
-        <div class="chat-messages" id="chatBox">
-            <div class="msg app"><div class="label">System</div>Waiting for connection...</div>
-        </div>
+        <div class="status-bar" id="statusBar">🔄 Connecting to Supabase...</div>
+        <div class="chat-messages" id="chatBox"></div>
         <div class="expired-bar" id="expiredBanner">⏰ Session expired</div>
         <div class="chat-input" id="chatInputBar">
             <input type="text" id="chatInput" placeholder="Type a message..." />
@@ -123,27 +123,59 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// ── CONFIG ──
-const SUPABASE_URL = 'https://gyjdbqmdoofkywmnxhyc.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA';
+// ══════════════════════════════════
+// CONFIG — Direct REST (no SDK needed)
+// ══════════════════════════════════
+const SUPA_URL = 'https://gyjdbqmdoofkywmnxhyc.supabase.co';
+const SUPA_KEY = 'sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA';
 const MAX_SEC = 300;
+
+const HEADERS = {
+    'apikey': SUPA_KEY,
+    'Authorization': 'Bearer ' + SUPA_KEY,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=minimal'
+};
+const HEADERS_READ = {
+    'apikey': SUPA_KEY,
+    'Authorization': 'Bearer ' + SUPA_KEY
+};
 
 const params = new URLSearchParams(window.location.search);
 const sosId = params.get('id');
-let active = true, remaining = MAX_SEC, updates = 0;
+let active = true, remaining = MAX_SEC, updates = 0, lastChatId = 0;
 let map, marker, polyline;
 const trail = [];
 
-// Supabase client
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
 if (!sosId) {
-    document.getElementById('chatBox').innerHTML = '<div class="msg app">❌ No SOS ID in URL</div>';
+    document.getElementById('chatBox').innerHTML = '<div class="msg app">❌ No SOS ID in URL. Add ?id=YOUR_ID</div>';
+    document.getElementById('statusBar').textContent = '❌ No SOS ID';
+    document.getElementById('statusBar').className = 'status-bar err';
 } else {
-    document.getElementById('sosLabel').textContent = `Session: ${sosId}`;
-    startCountdown();
-    pollLocation();
-    subscribeChatRealtime();
+    document.getElementById('sosLabel').textContent = 'Session: ' + sosId;
+    testConnection();
+}
+
+// ══════════════════════════════════
+// TEST CONNECTION
+// ══════════════════════════════════
+async function testConnection() {
+    try {
+        const r = await fetch(SUPA_URL + '/rest/v1/locations?limit=1', { headers: HEADERS_READ });
+        if (r.ok) {
+            document.getElementById('statusBar').textContent = '✅ Connected — Tracking live';
+            document.getElementById('statusBar').className = 'status-bar';
+            startCountdown();
+            pollLocation();
+            pollChat();
+        } else {
+            document.getElementById('statusBar').textContent = '❌ Supabase error: ' + r.status;
+            document.getElementById('statusBar').className = 'status-bar err';
+        }
+    } catch (e) {
+        document.getElementById('statusBar').textContent = '❌ Connection failed: ' + e.message;
+        document.getElementById('statusBar').className = 'status-bar err';
+    }
 }
 
 // ══════════════════════════════════
@@ -159,7 +191,7 @@ function startCountdown() {
 }
 function updateTimerUI() {
     const m = Math.floor(remaining / 60), s = remaining % 60;
-    document.getElementById('countdown').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    document.getElementById('countdown').textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
 }
 function stopSession() {
     active = false;
@@ -168,10 +200,11 @@ function stopSession() {
     document.getElementById('pulseIcon').classList.add('off');
     document.getElementById('expiredBanner').style.display = 'block';
     document.getElementById('chatInputBar').style.display = 'none';
+    document.getElementById('statusBar').textContent = '⏰ Session ended';
 }
 
 // ══════════════════════════════════
-// MAP — Location Polling
+// MAP — Location Polling (REST)
 // ══════════════════════════════════
 function initMap(lat, lng) {
     map = L.map('map').setView([lat, lng], 16);
@@ -195,64 +228,60 @@ function updateMap(lat, lng) {
 async function pollLocation() {
     if (!active) return;
     try {
-        const { data } = await supabase.from('locations')
-            .select('*').eq('sos_id', sosId).order('id', { ascending: false }).limit(1);
-        if (data && data.length > 0) updateMap(data[0].lat, data[0].lng);
-    } catch (e) { console.error(e); }
+        const url = SUPA_URL + '/rest/v1/locations?sos_id=eq.' + sosId + '&order=id.desc&limit=1';
+        const r = await fetch(url, { headers: HEADERS_READ });
+        if (r.ok) {
+            const data = await r.json();
+            if (data.length > 0) updateMap(data[0].lat, data[0].lng);
+        }
+    } catch (e) { console.error('Location poll error:', e); }
     setTimeout(pollLocation, 5000);
 }
 
 // ══════════════════════════════════
-// CHAT — Realtime Subscribe
+// CHAT — Polling (REST, every 3s)
 // ══════════════════════════════════
-function subscribeChatRealtime() {
-    supabase.channel('sos_chats_' + sosId)
-        .on('postgres_changes', {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'sos_chats',
-            filter: `sos_id=eq.${sosId}`
-        }, (payload) => {
-            const row = payload.new;
-            // Only show messages from app side (our own messages are added locally)
-            if (row.sender_type === 'app') {
+async function pollChat() {
+    if (!active) return;
+    try {
+        const url = SUPA_URL + '/rest/v1/sos_chats?sos_id=eq.' + sosId + '&id=gt.' + lastChatId + '&order=id.asc';
+        const r = await fetch(url, { headers: HEADERS_READ });
+        if (r.ok) {
+            const data = await r.json();
+            data.forEach(row => {
                 appendChat(row.sender_type, row.message_type, row.content);
-            }
-        })
-        .subscribe();
-
-    // Load existing messages
-    loadExistingChats();
-}
-
-async function loadExistingChats() {
-    const { data } = await supabase.from('sos_chats')
-        .select('*').eq('sos_id', sosId).order('id', { ascending: true });
-    if (data) {
-        document.getElementById('chatBox').innerHTML = '';
-        data.forEach(r => appendChat(r.sender_type, r.message_type, r.content));
-    }
+                if (row.id > lastChatId) lastChatId = row.id;
+            });
+        }
+    } catch (e) { console.error('Chat poll error:', e); }
+    setTimeout(pollChat, 3000);
 }
 
 function appendChat(sender, type, content) {
     const box = document.getElementById('chatBox');
     const div = document.createElement('div');
-    div.className = `msg ${sender}`;
+    div.className = 'msg ' + sender;
     const label = sender === 'app' ? '📱 Victim' : '🖥️ You';
     if (type === 'audio') {
-        div.innerHTML = `<div class="label">${label}</div><audio controls src="${content}"></audio>`;
+        div.innerHTML = '<div class="label">' + label + '</div><audio controls src="' + content + '"></audio>';
     } else {
-        div.innerHTML = `<div class="label">${label}</div>${content}`;
+        div.innerHTML = '<div class="label">' + label + '</div>' + escapeHtml(content);
     }
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
 }
 
 // ══════════════════════════════════
 // CHAT — Send Text (Web -> App)
 // ══════════════════════════════════
 document.getElementById('btnSendWeb').addEventListener('click', sendTextFromWeb);
-document.getElementById('chatInput').addEventListener('keydown', (e) => {
+document.getElementById('chatInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') sendTextFromWeb();
 });
 
@@ -263,9 +292,16 @@ async function sendTextFromWeb() {
     if (!text) return;
     input.value = '';
     appendChat('web', 'text', text);
-    await supabase.from('sos_chats').insert({
-        sos_id: sosId, sender_type: 'web', message_type: 'text', content: text
-    });
+
+    try {
+        await fetch(SUPA_URL + '/rest/v1/sos_chats', {
+            method: 'POST',
+            headers: HEADERS,
+            body: JSON.stringify({
+                sos_id: sosId, sender_type: 'web', message_type: 'text', content: text
+            })
+        });
+    } catch (e) { console.error('Send error:', e); }
 }
 
 // ══════════════════════════════════
@@ -276,8 +312,8 @@ const btnMic = document.getElementById('btnMicWeb');
 
 btnMic.addEventListener('mousedown', startWebRecording);
 btnMic.addEventListener('mouseup', stopWebRecording);
-btnMic.addEventListener('touchstart', (e) => { e.preventDefault(); startWebRecording(); });
-btnMic.addEventListener('touchend', (e) => { e.preventDefault(); stopWebRecording(); });
+btnMic.addEventListener('touchstart', function(e) { e.preventDefault(); startWebRecording(); });
+btnMic.addEventListener('touchend', function(e) { e.preventDefault(); stopWebRecording(); });
 
 async function startWebRecording() {
     if (!active) return;
@@ -285,22 +321,37 @@ async function startWebRecording() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         audioChunks = [];
-        mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
-        mediaRecorder.onstop = async () => {
-            stream.getTracks().forEach(t => t.stop());
+        mediaRecorder.ondataavailable = function(e) { audioChunks.push(e.data); };
+        mediaRecorder.onstop = async function() {
+            stream.getTracks().forEach(function(t) { t.stop(); });
             const blob = new Blob(audioChunks, { type: 'audio/webm' });
-            const fileName = `${sosId}_web_${Date.now()}.webm`;
-            // Upload to Supabase Storage
-            const { data, error } = await supabase.storage.from('sos-recordings').upload(fileName, blob, {
-                contentType: 'audio/webm', upsert: false
-            });
-            if (error) { console.error(error); return; }
-            const { data: urlData } = supabase.storage.from('sos-recordings').getPublicUrl(fileName);
-            const publicUrl = urlData.publicUrl;
-            appendChat('web', 'audio', publicUrl);
-            await supabase.from('sos_chats').insert({
-                sos_id: sosId, sender_type: 'web', message_type: 'audio', content: publicUrl
-            });
+            const fileName = sosId + '_web_' + Date.now() + '.webm';
+
+            // Upload to Supabase Storage via REST
+            try {
+                const uploadResp = await fetch(SUPA_URL + '/storage/v1/object/sos-recordings/' + fileName, {
+                    method: 'POST',
+                    headers: {
+                        'apikey': SUPA_KEY,
+                        'Authorization': 'Bearer ' + SUPA_KEY,
+                        'Content-Type': 'audio/webm'
+                    },
+                    body: blob
+                });
+                if (uploadResp.ok) {
+                    const publicUrl = SUPA_URL + '/storage/v1/object/public/sos-recordings/' + fileName;
+                    appendChat('web', 'audio', publicUrl);
+                    await fetch(SUPA_URL + '/rest/v1/sos_chats', {
+                        method: 'POST',
+                        headers: HEADERS,
+                        body: JSON.stringify({
+                            sos_id: sosId, sender_type: 'web', message_type: 'audio', content: publicUrl
+                        })
+                    });
+                } else {
+                    console.error('Upload failed:', uploadResp.status);
+                }
+            } catch (e) { console.error('Audio upload error:', e); }
         };
         mediaRecorder.start();
         btnMic.classList.add('recording');

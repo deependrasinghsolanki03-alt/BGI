@@ -3,9 +3,6 @@ package com.bgi.pathfinder.ui
 
 import android.content.Intent
 import android.os.Build
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.widget.ImageButton
 
 import android.Manifest
@@ -36,6 +33,7 @@ import com.bgi.pathfinder.R
 import com.bgi.pathfinder.models.SearchResult
 import com.bgi.pathfinder.network.OrsClient
 import com.bgi.pathfinder.network.GroqClient
+import com.bgi.pathfinder.network.SupabaseClient
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -105,7 +103,6 @@ class MapActivity : AppCompatActivity() {
     private lateinit var btnSendChat: ImageButton
     private lateinit var btnCloseChat: ImageButton
     private lateinit var chatAdapter: ChatAdapter
-    private var speechRecognizer: SpeechRecognizer? = null
     private var isChatOpen = false
 
     // SOS — GPS
@@ -557,179 +554,219 @@ class MapActivity : AppCompatActivity() {
         rvChatMessages.layoutManager = LinearLayoutManager(this)
         rvChatMessages.adapter = chatAdapter
 
-        // Toggle chat sheet
+        // Chat is hidden by default — opens with SOS
         fabChat.setOnClickListener {
+            if (!isTracking) {
+                Toast.makeText(this, "⚠️ Chat opens with SOS. Tap the red SOS button first.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             isChatOpen = !isChatOpen
             chatSheet.visibility = if (isChatOpen) View.VISIBLE else View.GONE
-            if (isChatOpen && chatAdapter.itemCount == 0) {
-                chatAdapter.addMessage(ChatMessage("👋 Hi! Tell me where you want to go.\nExample: \"Mujhe Indore jana hai\"", false))
-            }
         }
         btnCloseChat.setOnClickListener {
             isChatOpen = false
             chatSheet.visibility = View.GONE
         }
 
-        // Send button
+        // Send text message
         btnSendChat.setOnClickListener {
             val text = etChatInput.text.toString().trim()
-            if (text.isNotEmpty()) {
-                sendChatMessage(text)
+            if (text.isNotEmpty() && currentSosId != null) {
+                sendSosChatText(text)
                 etChatInput.text.clear()
                 hideKeyboard()
             }
         }
 
-        // Mic button — Speech-to-Text
-        btnMic.setOnClickListener { startVoiceInput() }
+        // Mic — hold to record audio
+        btnMic.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> { startAudioRecording(); true }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { stopAudioRecording(); true }
+                else -> false
+            }
+        }
     }
 
-    private fun startVoiceInput() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), AUDIO_PERMISSION_CODE)
-            return
-        }
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Toast.makeText(this, "Speech recognition not available", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        speechRecognizer?.destroy()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")  // Hindi + English
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        }
-
-        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {
-                btnMic.alpha = 0.5f
-                Toast.makeText(this@MapActivity, "🎤 Listening...", Toast.LENGTH_SHORT).show()
-            }
-            override fun onResults(results: Bundle?) {
-                btnMic.alpha = 1f
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    etChatInput.setText(matches[0])
-                }
-            }
-            override fun onError(error: Int) {
-                btnMic.alpha = 1f
-                Toast.makeText(this@MapActivity, "Voice error. Try again.", Toast.LENGTH_SHORT).show()
-            }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { btnMic.alpha = 1f }
-            override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-
-        speechRecognizer?.startListening(intent)
-    }
-
-    /**
-     * Send user message to Groq AI, parse destination, auto-route.
-     */
-    private fun sendChatMessage(text: String) {
+    // ── Send text to Supabase sos_chats ──
+    private fun sendSosChatText(text: String) {
+        val sosId = currentSosId ?: return
         chatAdapter.addMessage(ChatMessage(text, true))
         rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
 
-        chatAdapter.addMessage(ChatMessage("🔄 Thinking...", false))
+        lifecycleScope.launch {
+            // Also try Groq AI routing if it looks like a destination request
+            if (text.contains("jana", true) || text.contains("go to", true) ||
+                text.contains("route", true) || text.contains("navigate", true)) {
+                handleGroqRoute(text)
+            }
+            // Insert into Supabase
+            SupabaseClient.sendChatMessage(sosId, "app", "text", text)
+        }
+    }
+
+    // ── Groq AI route (preserved from previous) ──
+    private fun handleGroqRoute(text: String) {
+        chatAdapter.addMessage(ChatMessage("🔄 Finding location...", false))
         rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
 
         lifecycleScope.launch {
             val response = GroqClient.extractDestination(text)
-
-            // Remove "Thinking..." message by re-adding
             if (response == null) {
-                chatAdapter.addMessage(ChatMessage("❌ Could not connect to AI. Check internet.", false))
-                rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+                chatAdapter.addMessage(ChatMessage("❌ AI unavailable.", false))
                 return@launch
             }
-
             try {
                 val json = JSONObject(response)
-
                 if (json.has("error")) {
-                    chatAdapter.addMessage(ChatMessage("Sorry, I couldn't find that location. Please try again.", false))
-                    rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+                    chatAdapter.addMessage(ChatMessage("Sorry, couldn't find that location.", false))
                     return@launch
                 }
-
-                val destination = json.getString("destination")
+                val dest = json.getString("destination")
                 val lat = json.getDouble("lat")
                 val lng = json.getDouble("lng")
-
-                chatAdapter.addMessage(ChatMessage("📍 Found: $destination\n📐 ($lat, $lng)\n🗺️ Drawing route...", false))
-                rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
-
-                // Auto-route from current location to destination
-                routeToDestination(destination, lat, lng)
-
+                chatAdapter.addMessage(ChatMessage("📍 $dest ($lat, $lng)\n🗺️ Routing...", false))
+                routeToDestination(dest, lat, lng)
             } catch (e: Exception) {
-                chatAdapter.addMessage(ChatMessage("Sorry, I couldn't understand the response. Please try again.", false))
-                rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
-                android.util.Log.e("Chat", "Parse error: ${e.message} | Response: $response")
+                chatAdapter.addMessage(ChatMessage("Sorry, couldn't parse AI response.", false))
             }
         }
     }
 
-    /**
-     * Auto-route from user's current GPS to the AI-provided destination.
-     * Clears existing route, sets start/end points, calls ORS.
-     */
     private fun routeToDestination(name: String, lat: Double, lng: Double) {
-        // Get current location as start
         val myLoc = locationOverlay?.myLocation
         if (myLoc == null) {
-            chatAdapter.addMessage(ChatMessage("⚠️ GPS not ready. Please wait for GPS fix.", false))
+            chatAdapter.addMessage(ChatMessage("⚠️ GPS not ready.", false))
             return
         }
-
-        // Reset previous route
         resetAll()
-
-        // Set start = current location, end = AI destination
         startPoint = GeoPoint(myLoc.latitude, myLoc.longitude)
         endPoint = GeoPoint(lat, lng)
-
         etStartSearch.removeTextChangedListener(startTextWatcher)
         etEndSearch.removeTextChangedListener(endTextWatcher)
         etStartSearch.setText("📍 My Location")
         etEndSearch.setText(name)
         etStartSearch.addTextChangedListener(startTextWatcher)
         etEndSearch.addTextChangedListener(endTextWatcher)
-
         addMarker(startPoint!!, "START", Color.parseColor("#4CAF50"))
         addMarker(endPoint!!, name, Color.parseColor("#F44336"))
-
-        // Close chat and find routes
-        isChatOpen = false
-        chatSheet.visibility = View.GONE
+        isChatOpen = false; chatSheet.visibility = View.GONE
         findRoutes()
     }
 
     // ═══════════════════════════════════════
-    // SOS — Foreground Service + SMS
+    // Audio Recording (MediaRecorder)
     // ═══════════════════════════════════════
 
+    private var mediaRecorder: android.media.MediaRecorder? = null
+    private var audioFile: java.io.File? = null
+    private var isRecording = false
 
-    /**
-     * Toggle SOS tracking:
-     *   1st click → Start tracking + send SMS with live link
-     *   2nd click → Stop tracking
-     */
+    private fun startAudioRecording() {
+        if (currentSosId == null || !isTracking) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), AUDIO_PERMISSION_CODE)
+            return
+        }
+        try {
+            audioFile = java.io.File(cacheDir, "sos_audio_${System.currentTimeMillis()}.mp4")
+            mediaRecorder = android.media.MediaRecorder().apply {
+                setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+                setOutputFile(audioFile!!.absolutePath)
+                prepare()
+                start()
+            }
+            isRecording = true
+            btnMic.alpha = 0.5f
+            Toast.makeText(this, "🎤 Recording...", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "❌ Recording failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopAudioRecording() {
+        if (!isRecording) return
+        try {
+            mediaRecorder?.stop()
+            mediaRecorder?.release()
+            mediaRecorder = null
+            isRecording = false
+            btnMic.alpha = 1f
+
+            val file = audioFile ?: return
+            val sosId = currentSosId ?: return
+
+            chatAdapter.addMessage(ChatMessage("🔊 Sending voice note...", true))
+            rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+
+            lifecycleScope.launch {
+                val url = SupabaseClient.uploadAudio(file, sosId)
+                if (url != null) {
+                    SupabaseClient.sendChatMessage(sosId, "app", "audio", url)
+                    chatAdapter.addMessage(ChatMessage("🔊 Voice sent", true, true, url))
+                } else {
+                    chatAdapter.addMessage(ChatMessage("❌ Upload failed", true))
+                }
+                rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+                file.delete()
+            }
+        } catch (e: Exception) {
+            mediaRecorder?.release()
+            mediaRecorder = null
+            isRecording = false
+            btnMic.alpha = 1f
+        }
+    }
+
+    // ═══════════════════════════════════════
+    // Supabase Chat Polling (Web → App)
+    // ═══════════════════════════════════════
+
+    private var chatPollJob: Job? = null
+    private var lastChatId: Long = 0
+
+    private fun startChatPolling(sosId: String) {
+        chatPollJob?.cancel()
+        lastChatId = 0
+        chatPollJob = lifecycleScope.launch {
+            while (isTracking) {
+                try {
+                    val messages = SupabaseClient.getChatMessages(sosId, lastChatId)
+                    for (msg in messages) {
+                        val id = msg.getLong("id")
+                        val sender = msg.getString("sender_type")
+                        val type = msg.getString("message_type")
+                        val content = msg.getString("content")
+                        if (sender == "web") {
+                            if (type == "audio") {
+                                chatAdapter.addMessage(ChatMessage("🔊 Voice from contact", false, true, content))
+                            } else {
+                                chatAdapter.addMessage(ChatMessage(content, false))
+                            }
+                            rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+                        }
+                        if (id > lastChatId) lastChatId = id
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("ChatPoll", "Error: ${e.message}")
+                }
+                delay(3000) // Poll every 3 seconds
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════
+    // SOS — Foreground Service + SMS + Chat
+    // ═══════════════════════════════════════
+
     private fun handleSosClick() {
         if (isTracking) {
             stopSosTracking()
             return
         }
-
         // Check SMS permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS)
             != PackageManager.PERMISSION_GRANTED) {
@@ -753,10 +790,9 @@ class MapActivity : AppCompatActivity() {
         // Check GPS
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
         if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            Toast.makeText(this, "⚠️ GPS is off! Enable GPS for SOS.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "⚠️ GPS is off!", Toast.LENGTH_LONG).show()
             return
         }
-
         startSosTracking()
     }
 
@@ -774,23 +810,31 @@ class MapActivity : AppCompatActivity() {
             startService(serviceIntent)
         }
 
-        // 2. Update UI — FAB turns green + show banner
+        // 2. Update UI — FAB green + show banner + open chat
         isTracking = true
         fabSos.backgroundTintList = android.content.res.ColorStateList.valueOf(
             android.graphics.Color.parseColor("#4CAF50")
         )
         sosActiveCard.visibility = View.VISIBLE
-        startSosCountdown()
 
-        // 3. Send SMS with live tracking link
+        // 3. Open chat automatically
+        chatAdapter.clear()
+        chatAdapter.addMessage(ChatMessage("🆘 SOS Activated! Chat is live.\nYour contact can see your location and chat here.", false))
+        isChatOpen = true
+        chatSheet.visibility = View.VISIBLE
+
+        // 4. Start countdown + chat polling
+        startSosCountdown()
+        startChatPolling(sosId)
+
+        // 5. Send SMS
         try {
             val trackingUrl = "$TRACKING_BASE_URL/?id=$sosId"
             val msg = "EMERGENCY! I need help. Track me LIVE: $trackingUrl"
             @Suppress("DEPRECATION") val sms = SmsManager.getDefault()
             val parts = sms.divideMessage(msg)
             sms.sendMultipartTextMessage(SOS_PHONE_NUMBER, null, parts, null, null)
-            Toast.makeText(this, "🆘 SOS Active! SMS sent with live tracking link.", Toast.LENGTH_LONG).show()
-            android.util.Log.d("SOS", "✅ SMS sent: $trackingUrl")
+            Toast.makeText(this, "🆘 SOS Active! SMS sent.", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "❌ SMS failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -799,7 +843,7 @@ class MapActivity : AppCompatActivity() {
     private fun startSosCountdown() {
         sosTimerJob?.cancel()
         sosTimerJob = lifecycleScope.launch {
-            var remaining = 300 // 5 minutes in seconds
+            var remaining = 300
             while (remaining > 0 && isTracking) {
                 val min = remaining / 60
                 val sec = remaining % 60
@@ -808,31 +852,29 @@ class MapActivity : AppCompatActivity() {
                 remaining--
             }
             if (isTracking) {
-                // Auto-stop after 5 minutes
-                tvSosTimer.text = "⏰ Time expired — auto-stopped"
+                tvSosTimer.text = "⏰ Expired — auto-stopped"
                 stopSosTracking()
             }
         }
     }
 
     private fun stopSosTracking() {
-        // Stop countdown
-        sosTimerJob?.cancel()
-        sosTimerJob = null
+        sosTimerJob?.cancel(); sosTimerJob = null
+        chatPollJob?.cancel(); chatPollJob = null
 
-        // Stop foreground service
         val serviceIntent = Intent(this, com.bgi.pathfinder.service.SOSService::class.java).apply {
             action = com.bgi.pathfinder.service.SOSService.ACTION_STOP
         }
         startService(serviceIntent)
 
-        // Reset UI
         isTracking = false
         currentSosId = null
         fabSos.backgroundTintList = android.content.res.ColorStateList.valueOf(
             android.graphics.Color.parseColor("#FF0000")
         )
         sosActiveCard.visibility = View.GONE
-        Toast.makeText(this, "✅ SOS tracking stopped.", Toast.LENGTH_SHORT).show()
+        isChatOpen = false
+        chatSheet.visibility = View.GONE
+        Toast.makeText(this, "✅ SOS stopped.", Toast.LENGTH_SHORT).show()
     }
 }
