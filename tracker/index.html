@@ -3,216 +3,321 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🆘 Live SOS Tracker</title>
+    <title>🆘 SOS Emergency Dashboard</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; background: #0a0a1a; color: #fff; }
-        #map { width: 100%; height: 60vh; }
-        .header {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            padding: 16px 20px;
-            display: flex; align-items: center; justify-content: space-between;
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0a1a; color: #fff; height: 100vh; overflow: hidden; }
+
+        .dashboard { display: flex; height: 100vh; }
+
+        /* LEFT — Map */
+        .map-pane { flex: 1; position: relative; }
+        #map { width: 100%; height: 100%; }
+        .map-header {
+            position: absolute; top: 0; left: 0; right: 0; z-index: 999;
+            background: linear-gradient(135deg, rgba(26,26,46,0.95), rgba(22,33,62,0.95));
+            padding: 12px 20px; display: flex; align-items: center; gap: 12px;
             border-bottom: 2px solid #ff1744;
         }
-        .header-left { display: flex; align-items: center; gap: 12px; }
-        .header .pulse {
-            width: 12px; height: 12px; border-radius: 50%;
-            background: #ff1744; animation: pulse 1.5s infinite;
+        .pulse { width: 12px; height: 12px; border-radius: 50%; background: #ff1744; animation: pulse 1.5s infinite; }
+        .pulse.off { background: #555; animation: none; }
+        @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,23,68,.7)} 50%{box-shadow:0 0 0 10px rgba(255,23,68,0)} }
+        .map-header h1 { font-size: 16px; }
+        .map-header .meta { font-size: 12px; color: #ff9800; }
+        .timer-badge {
+            margin-left: auto; background: #ff1744; padding: 4px 12px; border-radius: 14px;
+            font-weight: 700; font-family: monospace; font-size: 14px;
         }
-        .pulse.stopped { background: #666; animation: none; }
-        @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(255,23,68,0.7); }
-            50% { box-shadow: 0 0 0 10px rgba(255,23,68,0); }
+        .timer-badge.off { background: #555; }
+        .map-info {
+            position: absolute; bottom: 0; left: 0; right: 0; z-index: 999;
+            background: rgba(26,26,46,0.9); padding: 8px 16px; font-size: 12px; color: #b0bec5;
+            display: flex; gap: 20px;
         }
-        .header h1 { font-size: 18px; font-weight: 600; }
-        .header .sos-id { color: #ff9800; font-size: 13px; }
-        .timer {
-            background: #ff1744; color: #fff; padding: 6px 14px;
-            border-radius: 20px; font-size: 14px; font-weight: 700;
-            font-family: monospace; letter-spacing: 1px;
+        .map-info span { color: #64ffda; font-weight: 600; }
+
+        /* RIGHT — Chat */
+        .chat-pane {
+            width: 380px; display: flex; flex-direction: column;
+            background: #0f0f23; border-left: 1px solid #1e1e3a;
         }
-        .timer.expired { background: #555; }
-        .info-bar {
-            background: #1a1a2e; padding: 12px 20px;
-            display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
-            font-size: 13px; color: #b0bec5;
+        .chat-header {
+            padding: 14px 16px; background: #1a1a2e;
+            border-bottom: 1px solid #2a2a4a; font-size: 15px; font-weight: 700; color: #b388ff;
         }
-        .info-bar span { color: #64ffda; font-weight: 600; }
-        .status {
-            text-align: center; padding: 60px 20px;
-            font-size: 16px; color: #78909c;
+        .chat-messages {
+            flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px;
         }
-        .status .spinner {
-            width: 40px; height: 40px; border: 4px solid #333;
-            border-top-color: #ff1744; border-radius: 50%;
-            animation: spin 1s linear infinite; margin: 0 auto 20px;
+        .msg { max-width: 85%; padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 1.4; word-break: break-word; }
+        .msg.app { align-self: flex-start; background: #1e3a5f; color: #bbdefb; border-bottom-left-radius: 4px; }
+        .msg.web { align-self: flex-end; background: #3f51b5; color: #fff; border-bottom-right-radius: 4px; }
+        .msg .label { font-size: 10px; color: #888; margin-bottom: 4px; }
+        .msg audio { width: 100%; margin-top: 6px; }
+
+        .chat-input {
+            padding: 10px; background: #1a1a2e; border-top: 1px solid #2a2a4a;
+            display: flex; gap: 6px; align-items: center;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .expired-banner {
-            background: #333; text-align: center; padding: 16px;
-            font-size: 15px; color: #ff9800; display: none;
+        .chat-input input {
+            flex: 1; background: #12122a; border: 1px solid #2a2a4a; border-radius: 10px;
+            padding: 10px 14px; color: #e0e0ff; font-size: 13px; outline: none;
         }
-        .stop-btn {
-            display: block; width: calc(100% - 40px); margin: 12px auto;
-            padding: 14px; border: none; border-radius: 12px;
-            background: #ff1744; color: #fff; font-size: 16px; font-weight: 700;
-            cursor: pointer; letter-spacing: 1px;
+        .chat-input input::placeholder { color: #555; }
+        .chat-input button {
+            width: 40px; height: 40px; border: none; border-radius: 10px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; font-size: 18px;
         }
-        .stop-btn:hover { background: #d50000; }
-        .stop-btn:disabled { background: #555; cursor: default; }
+        .btn-send { background: #3f51b5; color: #fff; }
+        .btn-mic { background: #7c4dff; color: #fff; }
+        .btn-mic.recording { background: #ff1744; animation: pulse 1s infinite; }
+
+        .expired-bar {
+            text-align: center; padding: 12px; background: #333; color: #ff9800;
+            font-size: 14px; display: none;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard { flex-direction: column; }
+            .map-pane { height: 50vh; }
+            .chat-pane { width: 100%; height: 50vh; }
+        }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="header-left">
+<div class="dashboard">
+    <!-- LEFT: Map -->
+    <div class="map-pane">
+        <div class="map-header">
             <div class="pulse" id="pulseIcon"></div>
             <div>
-                <h1>🆘 Live SOS Tracker</h1>
-                <div class="sos-id" id="sosLabel">Connecting...</div>
+                <h1>🆘 SOS Emergency</h1>
+                <div class="meta" id="sosLabel">Connecting...</div>
             </div>
+            <div class="timer-badge" id="countdown">05:00</div>
         </div>
-        <div class="timer" id="countdown">05:00</div>
-    </div>
-
-    <div class="expired-banner" id="expiredBanner">
-        ⏰ Tracking session expired (5 min limit). Last known location shown above.
-    </div>
-
-    <div id="mapContainer" style="display:none;">
         <div id="map"></div>
-        <div class="info-bar">
+        <div class="map-info">
             <div>📍 Lat: <span id="lat">--</span></div>
             <div>📍 Lng: <span id="lng">--</span></div>
-            <div>🕐 Last update: <span id="time">--</span></div>
+            <div>🕐 <span id="time">--</span></div>
             <div>📊 Updates: <span id="updateCount">0</span></div>
         </div>
-        <button class="stop-btn" id="btnStop" onclick="manualStop()">🛑 Stop Tracking</button>
     </div>
 
-    <div class="status" id="statusMsg">
-        <div class="spinner"></div>
-        <p>Waiting for location data...</p>
-        <p style="margin-top:8px;font-size:13px;">The person's GPS will appear here shortly.</p>
+    <!-- RIGHT: Chat -->
+    <div class="chat-pane">
+        <div class="chat-header">💬 Emergency Chat</div>
+        <div class="chat-messages" id="chatBox">
+            <div class="msg app"><div class="label">System</div>Waiting for connection...</div>
+        </div>
+        <div class="expired-bar" id="expiredBanner">⏰ Session expired</div>
+        <div class="chat-input" id="chatInputBar">
+            <input type="text" id="chatInput" placeholder="Type a message..." />
+            <button class="btn-mic" id="btnMicWeb" title="Hold to record">🎤</button>
+            <button class="btn-send" id="btnSendWeb" title="Send">➤</button>
+        </div>
     </div>
+</div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        const SUPABASE_URL = 'https://gyjdbqmdoofkywmnxhyc.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA';
-        const MAX_DURATION_SEC = 5 * 60; // 5 minutes
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── CONFIG ──
+const SUPABASE_URL = 'https://gyjdbqmdoofkywmnxhyc.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA';
+const MAX_SEC = 300;
 
-        const params = new URLSearchParams(window.location.search);
-        const sosId = params.get('id');
-        let trackingActive = true;
-        let remainingSeconds = MAX_DURATION_SEC;
-        let updates = 0;
-        let pollTimer = null;
+const params = new URLSearchParams(window.location.search);
+const sosId = params.get('id');
+let active = true, remaining = MAX_SEC, updates = 0;
+let map, marker, polyline;
+const trail = [];
 
-        if (!sosId) {
-            document.getElementById('statusMsg').innerHTML = '<p style="color:#ff1744;">❌ No SOS ID provided in URL.</p>';
-            document.getElementById('countdown').style.display = 'none';
-        } else {
-            document.getElementById('sosLabel').textContent = `Session: ${sosId}`;
-            startCountdown();
-            pollTimer = setTimeout(pollLocation, 0);
-        }
+// Supabase client
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        let map, marker, polyline;
-        const trail = [];
+if (!sosId) {
+    document.getElementById('chatBox').innerHTML = '<div class="msg app">❌ No SOS ID in URL</div>';
+} else {
+    document.getElementById('sosLabel').textContent = `Session: ${sosId}`;
+    startCountdown();
+    pollLocation();
+    subscribeChatRealtime();
+}
 
-        // ── Countdown Timer ──
-        function startCountdown() {
-            updateCountdownDisplay();
-            const interval = setInterval(() => {
-                remainingSeconds--;
-                updateCountdownDisplay();
-                if (remainingSeconds <= 0) {
-                    clearInterval(interval);
-                    stopTracking();
-                }
-            }, 1000);
-        }
+// ══════════════════════════════════
+// COUNTDOWN TIMER
+// ══════════════════════════════════
+function startCountdown() {
+    updateTimerUI();
+    const iv = setInterval(() => {
+        remaining--;
+        updateTimerUI();
+        if (remaining <= 0) { clearInterval(iv); stopSession(); }
+    }, 1000);
+}
+function updateTimerUI() {
+    const m = Math.floor(remaining / 60), s = remaining % 60;
+    document.getElementById('countdown').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+function stopSession() {
+    active = false;
+    document.getElementById('countdown').textContent = 'ENDED';
+    document.getElementById('countdown').classList.add('off');
+    document.getElementById('pulseIcon').classList.add('off');
+    document.getElementById('expiredBanner').style.display = 'block';
+    document.getElementById('chatInputBar').style.display = 'none';
+}
 
-        function updateCountdownDisplay() {
-            const min = Math.floor(remainingSeconds / 60);
-            const sec = remainingSeconds % 60;
-            document.getElementById('countdown').textContent =
-                `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
-        }
+// ══════════════════════════════════
+// MAP — Location Polling
+// ══════════════════════════════════
+function initMap(lat, lng) {
+    map = L.map('map').setView([lat, lng], 16);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OSM'
+    }).addTo(map);
+    marker = L.marker([lat, lng]).addTo(map).bindPopup('🆘 Live').openPopup();
+    polyline = L.polyline([], { color: '#ff1744', weight: 3 }).addTo(map);
+}
+function updateMap(lat, lng) {
+    if (!map) initMap(lat, lng);
+    else { marker.setLatLng([lat, lng]); map.panTo([lat, lng]); }
+    trail.push([lat, lng]);
+    polyline.setLatLngs(trail);
+    updates++;
+    document.getElementById('lat').textContent = lat.toFixed(6);
+    document.getElementById('lng').textContent = lng.toFixed(6);
+    document.getElementById('time').textContent = new Date().toLocaleTimeString();
+    document.getElementById('updateCount').textContent = updates;
+}
+async function pollLocation() {
+    if (!active) return;
+    try {
+        const { data } = await supabase.from('locations')
+            .select('*').eq('sos_id', sosId).order('id', { ascending: false }).limit(1);
+        if (data && data.length > 0) updateMap(data[0].lat, data[0].lng);
+    } catch (e) { console.error(e); }
+    setTimeout(pollLocation, 5000);
+}
 
-        function stopTracking() {
-            trackingActive = false;
-            document.getElementById('countdown').textContent = 'STOPPED';
-            document.getElementById('countdown').classList.add('expired');
-            document.getElementById('pulseIcon').classList.add('stopped');
-            document.getElementById('expiredBanner').style.display = 'block';
-            document.getElementById('btnStop').disabled = true;
-            document.getElementById('btnStop').textContent = '✅ Tracking Stopped';
-        }
-
-        function manualStop() {
-            stopTracking();
-            document.getElementById('expiredBanner').textContent = '🛑 Tracking stopped manually. Last known location shown above.';
-        }
-
-        // ── Map ──
-        function initMap(lat, lng) {
-            document.getElementById('mapContainer').style.display = 'block';
-            document.getElementById('statusMsg').style.display = 'none';
-
-            map = L.map('map').setView([lat, lng], 16);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap'
-            }).addTo(map);
-
-            marker = L.marker([lat, lng]).addTo(map)
-                .bindPopup('🆘 Live Location').openPopup();
-
-            polyline = L.polyline([], { color: '#ff1744', weight: 3 }).addTo(map);
-        }
-
-        function updateMap(lat, lng) {
-            if (!map) {
-                initMap(lat, lng);
-            } else {
-                marker.setLatLng([lat, lng]);
-                map.panTo([lat, lng]);
+// ══════════════════════════════════
+// CHAT — Realtime Subscribe
+// ══════════════════════════════════
+function subscribeChatRealtime() {
+    supabase.channel('sos_chats_' + sosId)
+        .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'sos_chats',
+            filter: `sos_id=eq.${sosId}`
+        }, (payload) => {
+            const row = payload.new;
+            // Only show messages from app side (our own messages are added locally)
+            if (row.sender_type === 'app') {
+                appendChat(row.sender_type, row.message_type, row.content);
             }
-            trail.push([lat, lng]);
-            polyline.setLatLngs(trail);
+        })
+        .subscribe();
 
-            updates++;
-            document.getElementById('lat').textContent = lat.toFixed(6);
-            document.getElementById('lng').textContent = lng.toFixed(6);
-            document.getElementById('time').textContent = new Date().toLocaleTimeString();
-            document.getElementById('updateCount').textContent = updates;
-        }
+    // Load existing messages
+    loadExistingChats();
+}
 
-        // ── Polling ──
-        async function pollLocation() {
-            if (!trackingActive) return; // Stop polling when expired
+async function loadExistingChats() {
+    const { data } = await supabase.from('sos_chats')
+        .select('*').eq('sos_id', sosId).order('id', { ascending: true });
+    if (data) {
+        document.getElementById('chatBox').innerHTML = '';
+        data.forEach(r => appendChat(r.sender_type, r.message_type, r.content));
+    }
+}
 
-            try {
-                const url = `${SUPABASE_URL}/rest/v1/locations?sos_id=eq.${sosId}&order=id.desc&limit=1`;
-                const res = await fetch(url, {
-                    headers: {
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                    }
-                });
-                const data = await res.json();
-                if (data.length > 0) {
-                    updateMap(data[0].lat, data[0].lng);
-                }
-            } catch (e) {
-                console.error('Poll error:', e);
-            }
-            // Continue polling every 5 seconds
-            if (trackingActive) {
-                pollTimer = setTimeout(pollLocation, 5000);
-            }
-        }
-    </script>
+function appendChat(sender, type, content) {
+    const box = document.getElementById('chatBox');
+    const div = document.createElement('div');
+    div.className = `msg ${sender}`;
+    const label = sender === 'app' ? '📱 Victim' : '🖥️ You';
+    if (type === 'audio') {
+        div.innerHTML = `<div class="label">${label}</div><audio controls src="${content}"></audio>`;
+    } else {
+        div.innerHTML = `<div class="label">${label}</div>${content}`;
+    }
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+}
+
+// ══════════════════════════════════
+// CHAT — Send Text (Web -> App)
+// ══════════════════════════════════
+document.getElementById('btnSendWeb').addEventListener('click', sendTextFromWeb);
+document.getElementById('chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendTextFromWeb();
+});
+
+async function sendTextFromWeb() {
+    if (!active) return;
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    appendChat('web', 'text', text);
+    await supabase.from('sos_chats').insert({
+        sos_id: sosId, sender_type: 'web', message_type: 'text', content: text
+    });
+}
+
+// ══════════════════════════════════
+// CHAT — Audio Recording (Web)
+// ══════════════════════════════════
+let mediaRecorder, audioChunks = [];
+const btnMic = document.getElementById('btnMicWeb');
+
+btnMic.addEventListener('mousedown', startWebRecording);
+btnMic.addEventListener('mouseup', stopWebRecording);
+btnMic.addEventListener('touchstart', (e) => { e.preventDefault(); startWebRecording(); });
+btnMic.addEventListener('touchend', (e) => { e.preventDefault(); stopWebRecording(); });
+
+async function startWebRecording() {
+    if (!active) return;
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        audioChunks = [];
+        mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+        mediaRecorder.onstop = async () => {
+            stream.getTracks().forEach(t => t.stop());
+            const blob = new Blob(audioChunks, { type: 'audio/webm' });
+            const fileName = `${sosId}_web_${Date.now()}.webm`;
+            // Upload to Supabase Storage
+            const { data, error } = await supabase.storage.from('sos-recordings').upload(fileName, blob, {
+                contentType: 'audio/webm', upsert: false
+            });
+            if (error) { console.error(error); return; }
+            const { data: urlData } = supabase.storage.from('sos-recordings').getPublicUrl(fileName);
+            const publicUrl = urlData.publicUrl;
+            appendChat('web', 'audio', publicUrl);
+            await supabase.from('sos_chats').insert({
+                sos_id: sosId, sender_type: 'web', message_type: 'audio', content: publicUrl
+            });
+        };
+        mediaRecorder.start();
+        btnMic.classList.add('recording');
+        btnMic.textContent = '⏹️';
+    } catch (e) {
+        console.error('Mic error:', e);
+        alert('Microphone access denied.');
+    }
+}
+
+function stopWebRecording() {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        btnMic.classList.remove('recording');
+        btnMic.textContent = '🎤';
+    }
+}
+</script>
 </body>
 </html>
