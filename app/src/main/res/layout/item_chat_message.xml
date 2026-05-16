@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingHorizontal="8dp"
+    android:paddingVertical="3dp">
+
+    <TextView
+        android:id="@+id/tvChatMessage"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:maxWidth="280dp"
+        android:padding="10dp"
+        android:textSize="14sp"
+        android:textColor="#FFFFFF"
+        android:background="@drawable/chat_bubble_bg"
+        android:layout_gravity="start" />
+</FrameLayout>

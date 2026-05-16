@@ -3,6 +3,10 @@ package com.bgi.pathfinder.ui
 
 import android.content.Intent
 import android.os.Build
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.widget.ImageButton
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -31,6 +35,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.bgi.pathfinder.R
 import com.bgi.pathfinder.models.SearchResult
 import com.bgi.pathfinder.network.OrsClient
+import com.bgi.pathfinder.network.GroqClient
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -63,6 +68,7 @@ class MapActivity : AppCompatActivity() {
         private const val SOS_PHONE_NUMBER = "YOUR_TEST_NUMBER"
         // ⚠️ CHANGE to your deployed Vercel URL
         private const val TRACKING_BASE_URL = "https://bgi-rust.vercel.app"
+        private const val AUDIO_PERMISSION_CODE = 1004
     }
 
     private var isTracking = false
@@ -89,6 +95,18 @@ class MapActivity : AppCompatActivity() {
     private lateinit var sosActiveCard: MaterialCardView
     private lateinit var tvSosTimer: TextView
     private lateinit var btnStopSos: MaterialButton
+
+    // Chat Views
+    private lateinit var fabChat: FloatingActionButton
+    private lateinit var chatSheet: MaterialCardView
+    private lateinit var rvChatMessages: RecyclerView
+    private lateinit var etChatInput: EditText
+    private lateinit var btnMic: ImageButton
+    private lateinit var btnSendChat: ImageButton
+    private lateinit var btnCloseChat: ImageButton
+    private lateinit var chatAdapter: ChatAdapter
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var isChatOpen = false
 
     // SOS — GPS
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -128,6 +146,7 @@ class MapActivity : AppCompatActivity() {
         btnReset.setOnClickListener { resetAll() }
         fabSos.setOnClickListener { handleSosClick() }
         btnStopSos.setOnClickListener { stopSosTracking() }
+        setupChat()
 
         requestLocationPermission()
     }
@@ -159,6 +178,13 @@ class MapActivity : AppCompatActivity() {
         sosActiveCard = findViewById(R.id.sosActiveCard)
         tvSosTimer = findViewById(R.id.tvSosTimer)
         btnStopSos = findViewById(R.id.btnStopSos)
+        fabChat = findViewById(R.id.fabChat)
+        chatSheet = findViewById(R.id.chatSheet)
+        rvChatMessages = findViewById(R.id.rvChatMessages)
+        etChatInput = findViewById(R.id.etChatInput)
+        btnMic = findViewById(R.id.btnMic)
+        btnSendChat = findViewById(R.id.btnSendChat)
+        btnCloseChat = findViewById(R.id.btnCloseChat)
     }
 
     // ═══════════════════════════════════════
@@ -523,8 +549,175 @@ class MapActivity : AppCompatActivity() {
     }
 
     // ═══════════════════════════════════════
+    // AI Chat — Voice + Groq + Auto-Route
+    // ═══════════════════════════════════════
+
+    private fun setupChat() {
+        chatAdapter = ChatAdapter()
+        rvChatMessages.layoutManager = LinearLayoutManager(this)
+        rvChatMessages.adapter = chatAdapter
+
+        // Toggle chat sheet
+        fabChat.setOnClickListener {
+            isChatOpen = !isChatOpen
+            chatSheet.visibility = if (isChatOpen) View.VISIBLE else View.GONE
+            if (isChatOpen && chatAdapter.itemCount == 0) {
+                chatAdapter.addMessage(ChatMessage("👋 Hi! Tell me where you want to go.\nExample: \"Mujhe Indore jana hai\"", false))
+            }
+        }
+        btnCloseChat.setOnClickListener {
+            isChatOpen = false
+            chatSheet.visibility = View.GONE
+        }
+
+        // Send button
+        btnSendChat.setOnClickListener {
+            val text = etChatInput.text.toString().trim()
+            if (text.isNotEmpty()) {
+                sendChatMessage(text)
+                etChatInput.text.clear()
+                hideKeyboard()
+            }
+        }
+
+        // Mic button — Speech-to-Text
+        btnMic.setOnClickListener { startVoiceInput() }
+    }
+
+    private fun startVoiceInput() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), AUDIO_PERMISSION_CODE)
+            return
+        }
+
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "Speech recognition not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        speechRecognizer?.destroy()
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")  // Hindi + English
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+
+        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                btnMic.alpha = 0.5f
+                Toast.makeText(this@MapActivity, "🎤 Listening...", Toast.LENGTH_SHORT).show()
+            }
+            override fun onResults(results: Bundle?) {
+                btnMic.alpha = 1f
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    etChatInput.setText(matches[0])
+                }
+            }
+            override fun onError(error: Int) {
+                btnMic.alpha = 1f
+                Toast.makeText(this@MapActivity, "Voice error. Try again.", Toast.LENGTH_SHORT).show()
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() { btnMic.alpha = 1f }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+
+        speechRecognizer?.startListening(intent)
+    }
+
+    /**
+     * Send user message to Groq AI, parse destination, auto-route.
+     */
+    private fun sendChatMessage(text: String) {
+        chatAdapter.addMessage(ChatMessage(text, true))
+        rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+
+        chatAdapter.addMessage(ChatMessage("🔄 Thinking...", false))
+        rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+
+        lifecycleScope.launch {
+            val response = GroqClient.extractDestination(text)
+
+            // Remove "Thinking..." message by re-adding
+            if (response == null) {
+                chatAdapter.addMessage(ChatMessage("❌ Could not connect to AI. Check internet.", false))
+                rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+                return@launch
+            }
+
+            try {
+                val json = JSONObject(response)
+
+                if (json.has("error")) {
+                    chatAdapter.addMessage(ChatMessage("Sorry, I couldn't find that location. Please try again.", false))
+                    rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+                    return@launch
+                }
+
+                val destination = json.getString("destination")
+                val lat = json.getDouble("lat")
+                val lng = json.getDouble("lng")
+
+                chatAdapter.addMessage(ChatMessage("📍 Found: $destination\n📐 ($lat, $lng)\n🗺️ Drawing route...", false))
+                rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+
+                // Auto-route from current location to destination
+                routeToDestination(destination, lat, lng)
+
+            } catch (e: Exception) {
+                chatAdapter.addMessage(ChatMessage("Sorry, I couldn't understand the response. Please try again.", false))
+                rvChatMessages.scrollToPosition(chatAdapter.itemCount - 1)
+                android.util.Log.e("Chat", "Parse error: ${e.message} | Response: $response")
+            }
+        }
+    }
+
+    /**
+     * Auto-route from user's current GPS to the AI-provided destination.
+     * Clears existing route, sets start/end points, calls ORS.
+     */
+    private fun routeToDestination(name: String, lat: Double, lng: Double) {
+        // Get current location as start
+        val myLoc = locationOverlay?.myLocation
+        if (myLoc == null) {
+            chatAdapter.addMessage(ChatMessage("⚠️ GPS not ready. Please wait for GPS fix.", false))
+            return
+        }
+
+        // Reset previous route
+        resetAll()
+
+        // Set start = current location, end = AI destination
+        startPoint = GeoPoint(myLoc.latitude, myLoc.longitude)
+        endPoint = GeoPoint(lat, lng)
+
+        etStartSearch.removeTextChangedListener(startTextWatcher)
+        etEndSearch.removeTextChangedListener(endTextWatcher)
+        etStartSearch.setText("📍 My Location")
+        etEndSearch.setText(name)
+        etStartSearch.addTextChangedListener(startTextWatcher)
+        etEndSearch.addTextChangedListener(endTextWatcher)
+
+        addMarker(startPoint!!, "START", Color.parseColor("#4CAF50"))
+        addMarker(endPoint!!, name, Color.parseColor("#F44336"))
+
+        // Close chat and find routes
+        isChatOpen = false
+        chatSheet.visibility = View.GONE
+        findRoutes()
+    }
+
+    // ═══════════════════════════════════════
     // SOS — Foreground Service + SMS
     // ═══════════════════════════════════════
+
 
     /**
      * Toggle SOS tracking:
