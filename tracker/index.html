@@ -13,137 +13,172 @@
             height: 100%; width: 100%; overflow: hidden;
         }
 
-        /* ═══ DESKTOP: Side-by-side ═══ */
+        /* ═══ MOBILE-FIRST: Stacked ═══ */
         .dashboard {
-            display: flex; width: 100%; height: 100vh;
+            display: flex; flex-direction: column;
+            width: 100%; height: 100vh;
         }
 
-        /* ── Map Pane ── */
+        /* ── Map ── */
         .map-pane {
-            flex: 1; min-width: 0;
-            position: relative; display: flex; flex-direction: column;
+            height: 35vh; width: 100%;
+            position: relative; flex-shrink: 0;
         }
-        #map { flex: 1; width: 100%; min-height: 0; }
+        #map { width: 100%; height: 100%; }
 
         .map-header {
             position: absolute; top: 0; left: 0; right: 0; z-index: 999;
             background: linear-gradient(135deg, rgba(26,26,46,.95), rgba(22,33,62,.95));
-            padding: 10px 16px; display: flex; align-items: center; gap: 10px;
+            padding: 8px 12px; display: flex; align-items: center; gap: 8px;
             border-bottom: 2px solid #ff1744;
         }
-        .pulse { width: 12px; height: 12px; border-radius: 50%; background: #ff1744; flex-shrink: 0; animation: pulse-ring 1.5s infinite; }
+        .pulse { width: 10px; height: 10px; border-radius: 50%; background: #ff1744; flex-shrink: 0; animation: pulse-ring 1.5s infinite; }
         .pulse.off { background: #555; animation: none; }
-        @keyframes pulse-ring { 0%,100%{box-shadow:0 0 0 0 rgba(255,23,68,.7)} 50%{box-shadow:0 0 0 10px rgba(255,23,68,0)} }
-        .map-header h1 { font-size: 15px; white-space: nowrap; }
-        .map-header .meta { font-size: 11px; color: #ff9800; }
+        @keyframes pulse-ring { 0%,100%{box-shadow:0 0 0 0 rgba(255,23,68,.7)} 50%{box-shadow:0 0 0 8px rgba(255,23,68,0)} }
+        .map-header h1 { font-size: 13px; white-space: nowrap; }
+        .map-header .meta { font-size: 10px; color: #ff9800; }
         .timer-badge {
             margin-left: auto; flex-shrink: 0; background: #ff1744;
-            padding: 4px 12px; border-radius: 14px;
-            font-weight: 700; font-family: monospace; font-size: 14px;
+            padding: 3px 10px; border-radius: 12px;
+            font-weight: 700; font-family: monospace; font-size: 12px;
         }
         .timer-badge.off { background: #555; }
 
         .map-info {
             position: absolute; bottom: 0; left: 0; right: 0; z-index: 999;
-            background: rgba(26,26,46,.9); padding: 6px 14px;
-            font-size: 11px; color: #b0bec5;
-            display: flex; flex-wrap: wrap; gap: 14px;
+            background: rgba(26,26,46,.9); padding: 4px 10px;
+            font-size: 10px; color: #b0bec5;
+            display: flex; flex-wrap: wrap; gap: 10px;
         }
         .map-info span { color: #64ffda; font-weight: 600; }
 
-        /* ── Chat Pane ── */
+        /* ── Chat ── */
         .chat-pane {
-            width: 360px; flex-shrink: 0;
-            display: flex; flex-direction: column;
-            background: #0f0f23; border-left: 1px solid #1e1e3a;
+            flex: 1; display: flex; flex-direction: column;
+            background: #0f0f23; border-top: 1px solid #1e1e3a;
+            min-height: 0;
         }
         .chat-header {
-            padding: 12px 16px; background: #1a1a2e;
+            padding: 10px 14px; background: #1a1a2e;
             border-bottom: 1px solid #2a2a4a;
-            font-size: 15px; font-weight: 700; color: #b388ff; flex-shrink: 0;
+            font-size: 14px; font-weight: 700; color: #b388ff; flex-shrink: 0;
         }
         .status-bar {
-            padding: 5px 16px; background: #1a1a2e; text-align: center;
-            font-size: 11px; color: #4caf50;
+            padding: 4px 14px; background: #1a1a2e; text-align: center;
+            font-size: 10px; color: #4caf50;
             border-bottom: 1px solid #2a2a4a; flex-shrink: 0;
         }
         .status-bar.err { color: #ff5252; }
 
         .chat-messages {
             flex: 1; min-height: 0; overflow-y: auto;
-            padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+            padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
             -webkit-overflow-scrolling: touch;
         }
-        .chat-messages::-webkit-scrollbar { width: 4px; }
+        .chat-messages::-webkit-scrollbar { width: 3px; }
         .chat-messages::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
 
+        /* Message Bubbles */
         .msg {
-            max-width: 85%; padding: 10px 14px; border-radius: 14px;
-            font-size: 13px; line-height: 1.5;
+            max-width: 88%; padding: 8px 12px; border-radius: 14px;
+            font-size: 13px; line-height: 1.4;
             word-wrap: break-word; overflow-wrap: break-word;
         }
         .msg.app { align-self: flex-start; background: #1e3a5f; color: #bbdefb; border-bottom-left-radius: 4px; }
         .msg.web { align-self: flex-end; background: #3f51b5; color: #fff; border-bottom-right-radius: 4px; }
-        .msg .label { font-size: 10px; color: #888; margin-bottom: 3px; }
-        .msg audio { width: 100%; margin-top: 6px; }
+        .msg .label { font-size: 9px; color: #888; margin-bottom: 2px; }
 
-        .expired-bar {
-            text-align: center; padding: 10px; background: #333;
-            color: #ff9800; font-size: 13px; display: none; flex-shrink: 0;
+        /* ── Custom Audio Player ── */
+        .audio-player {
+            display: flex; align-items: center; gap: 8px;
+            margin-top: 5px; padding: 6px 10px;
+            background: rgba(0,0,0,.25); border-radius: 10px;
+            min-width: 200px;
+        }
+        .audio-play-btn {
+            width: 34px; height: 34px; border-radius: 50%;
+            border: none; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; flex-shrink: 0; transition: transform .1s;
+        }
+        .audio-play-btn:active { transform: scale(.9); }
+        .msg.app .audio-play-btn { background: #2196F3; color: #fff; }
+        .msg.web .audio-play-btn { background: #fff; color: #3f51b5; }
+
+        .audio-mid { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+        .audio-progress {
+            width: 100%; height: 4px; border-radius: 2px;
+            background: rgba(255,255,255,.15); overflow: hidden;
+            cursor: pointer; position: relative;
+        }
+        .audio-progress-bar {
+            height: 100%; width: 0%; border-radius: 2px;
+            transition: width .2s linear;
+        }
+        .msg.app .audio-progress-bar { background: #64B5F6; }
+        .msg.web .audio-progress-bar { background: #C5CAE9; }
+
+        .audio-time {
+            font-size: 10px; color: rgba(255,255,255,.6);
+            font-family: monospace;
         }
 
+        /* ── Expired ── */
+        .expired-bar {
+            text-align: center; padding: 8px; background: #333;
+            color: #ff9800; font-size: 12px; display: none; flex-shrink: 0;
+        }
+
+        /* ── Input Bar ── */
         .chat-input {
-            padding: 8px 10px; background: #1a1a2e;
+            padding: 6px 8px; background: #1a1a2e;
             border-top: 1px solid #2a2a4a;
-            display: flex; gap: 6px; align-items: center; flex-shrink: 0;
+            display: flex; gap: 5px; align-items: center; flex-shrink: 0;
         }
         .chat-input input {
             flex: 1; min-width: 0; background: #12122a;
             border: 1px solid #2a2a4a; border-radius: 10px;
-            padding: 10px 14px; color: #e0e0ff; font-size: 13px; outline: none;
+            padding: 9px 12px; color: #e0e0ff; font-size: 13px; outline: none;
         }
         .chat-input input:focus { border-color: #3f51b5; }
         .chat-input input::placeholder { color: #555; }
         .chat-input button {
-            width: 40px; height: 40px; flex-shrink: 0;
+            width: 38px; height: 38px; flex-shrink: 0;
             border: none; border-radius: 10px; cursor: pointer;
             display: flex; align-items: center; justify-content: center;
-            font-size: 18px; transition: transform .1s;
+            font-size: 17px; transition: transform .1s;
         }
         .chat-input button:active { transform: scale(.9); }
         .btn-send { background: #3f51b5; color: #fff; }
         .btn-mic { background: #7c4dff; color: #fff; }
         .btn-mic.recording { background: #ff1744; animation: pulse-ring 1s infinite; }
 
-        /* Recording timer */
         .rec-timer {
             font-size: 11px; color: #ff5252; font-family: monospace;
-            min-width: 40px; text-align: center; display: none;
+            min-width: 38px; text-align: center; display: none;
         }
         .rec-timer.active { display: block; }
 
-        /* ═══ MOBILE: Stacked ═══ */
-        @media (max-width: 768px) {
-            .dashboard { flex-direction: column; }
-            .map-pane { flex: none; height: 45vh; width: 100%; }
+        /* ═══ TABLET/DESKTOP: Side by side ═══ */
+        @media (min-width: 769px) {
+            .dashboard { flex-direction: row; }
+            .map-pane { flex: 1; height: 100vh; width: auto; }
             .chat-pane {
-                width: 100%; flex: 1;
-                border-left: none; border-top: 1px solid #1e1e3a;
+                width: 370px; border-top: none; border-left: 1px solid #1e1e3a;
             }
-            .map-header h1 { font-size: 13px; }
-            .map-info { font-size: 10px; gap: 8px; }
+            .map-header { padding: 10px 16px; gap: 10px; }
+            .map-header h1 { font-size: 15px; }
+            .timer-badge { font-size: 14px; padding: 4px 12px; }
+            .map-info { font-size: 11px; padding: 6px 14px; gap: 14px; }
+            .chat-header { font-size: 15px; padding: 12px 16px; }
+            .msg { font-size: 13px; max-width: 85%; }
         }
-        @media (max-width: 480px) {
-            .map-pane { height: 40vh; }
-            .chat-header { padding: 10px 12px; font-size: 14px; }
-            .chat-input input { padding: 8px 10px; font-size: 12px; }
-            .chat-input button { width: 36px; height: 36px; font-size: 16px; }
-            .msg { font-size: 12px; padding: 8px 12px; max-width: 90%; }
-        }
+
+        /* ═══ Landscape phone ═══ */
         @media (max-height: 500px) and (orientation: landscape) {
             .dashboard { flex-direction: row; }
             .map-pane { flex: 1; height: 100vh; }
-            .chat-pane { width: 40vw; height: 100vh; }
+            .chat-pane { width: 45vw; height: 100vh; border-top: none; border-left: 1px solid #1e1e3a; }
         }
     </style>
 </head>
@@ -161,10 +196,10 @@
         </div>
         <div id="map"></div>
         <div class="map-info">
-            <div>📍 Lat: <span id="lat">--</span></div>
-            <div>📍 Lng: <span id="lng">--</span></div>
+            <div>📍 <span id="lat">--</span></div>
+            <div>📍 <span id="lng">--</span></div>
             <div>🕐 <span id="time">--</span></div>
-            <div>📊 Updates: <span id="updateCount">0</span></div>
+            <div>📊 <span id="updateCount">0</span></div>
         </div>
     </div>
 
@@ -177,8 +212,8 @@
         <div class="chat-input" id="chatInputBar">
             <input type="text" id="chatInput" placeholder="Type a message..." autocomplete="off" />
             <span class="rec-timer" id="recTimer">00:00</span>
-            <button class="btn-mic" id="btnMicWeb" title="Click to start/stop recording">🎤</button>
-            <button class="btn-send" id="btnSendWeb" title="Send message">➤</button>
+            <button class="btn-mic" id="btnMicWeb" title="Tap to record">🎤</button>
+            <button class="btn-send" id="btnSendWeb" title="Send">➤</button>
         </div>
     </div>
 </div>
@@ -193,56 +228,44 @@ var SUPA_KEY = 'sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA';
 var MAX_SEC = 300;
 
 var HEADERS = {
-    'apikey': SUPA_KEY,
-    'Authorization': 'Bearer ' + SUPA_KEY,
-    'Content-Type': 'application/json',
-    'Prefer': 'return=minimal'
+    'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
+    'Content-Type': 'application/json', 'Prefer': 'return=minimal'
 };
-var HEADERS_READ = {
-    'apikey': SUPA_KEY,
-    'Authorization': 'Bearer ' + SUPA_KEY
-};
+var HEADERS_READ = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY };
 
 var params = new URLSearchParams(window.location.search);
 var sosId = params.get('id');
 var active = true, remaining = MAX_SEC, updates = 0, lastChatId = 0;
-var map, marker, polyline;
-var trail = [];
+var map, marker, polyline, trail = [];
 
 if (!sosId) {
-    document.getElementById('chatBox').innerHTML = '<div class="msg app">❌ No SOS ID. Use ?id=YOUR_ID</div>';
+    document.getElementById('chatBox').innerHTML = '<div class="msg app">❌ No SOS ID. Add ?id=YOUR_ID</div>';
     document.getElementById('statusBar').textContent = '❌ No SOS ID';
     document.getElementById('statusBar').className = 'status-bar err';
 } else {
-    document.getElementById('sosLabel').textContent = 'Session: ' + sosId;
+    document.getElementById('sosLabel').textContent = 'ID: ' + sosId;
     testConnection();
 }
 
-// ══════════════════════════════════
-// CONNECTION TEST
-// ══════════════════════════════════
+// ═══ CONNECTION ═══
 async function testConnection() {
     try {
         var r = await fetch(SUPA_URL + '/rest/v1/locations?limit=1', { headers: HEADERS_READ });
         if (r.ok) {
-            document.getElementById('statusBar').textContent = '✅ Connected — Tracking live';
+            document.getElementById('statusBar').textContent = '✅ Connected — Live';
             document.getElementById('statusBar').className = 'status-bar';
-            startCountdown();
-            pollLocation();
-            pollChat();
+            startCountdown(); pollLocation(); pollChat();
         } else {
             document.getElementById('statusBar').textContent = '❌ Error: ' + r.status;
             document.getElementById('statusBar').className = 'status-bar err';
         }
     } catch (e) {
-        document.getElementById('statusBar').textContent = '❌ Failed: ' + e.message;
+        document.getElementById('statusBar').textContent = '❌ ' + e.message;
         document.getElementById('statusBar').className = 'status-bar err';
     }
 }
 
-// ══════════════════════════════════
-// COUNTDOWN
-// ══════════════════════════════════
+// ═══ COUNTDOWN ═══
 function startCountdown() {
     updateTimerUI();
     var iv = setInterval(function() {
@@ -253,8 +276,7 @@ function startCountdown() {
 }
 function updateTimerUI() {
     var m = Math.floor(remaining / 60), s = remaining % 60;
-    document.getElementById('countdown').textContent =
-        String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    document.getElementById('countdown').textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
 }
 function stopSession() {
     active = false;
@@ -263,52 +285,39 @@ function stopSession() {
     document.getElementById('pulseIcon').classList.add('off');
     document.getElementById('expiredBanner').style.display = 'block';
     document.getElementById('chatInputBar').style.display = 'none';
-    document.getElementById('statusBar').textContent = '⏰ Session ended';
+    document.getElementById('statusBar').textContent = '⏰ Ended';
 }
 
-// ══════════════════════════════════
-// MAP
-// ══════════════════════════════════
+// ═══ MAP ═══
 function initMap(lat, lng) {
     map = L.map('map').setView([lat, lng], 16);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OSM'
-    }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
     marker = L.marker([lat, lng]).addTo(map).bindPopup('🆘 Live').openPopup();
     polyline = L.polyline([], { color: '#ff1744', weight: 3 }).addTo(map);
 }
 function updateMap(lat, lng) {
     if (!map) initMap(lat, lng);
     else { marker.setLatLng([lat, lng]); map.panTo([lat, lng]); }
-    trail.push([lat, lng]);
-    polyline.setLatLngs(trail);
-    updates++;
-    document.getElementById('lat').textContent = lat.toFixed(6);
-    document.getElementById('lng').textContent = lng.toFixed(6);
+    trail.push([lat, lng]); polyline.setLatLngs(trail); updates++;
+    document.getElementById('lat').textContent = lat.toFixed(5);
+    document.getElementById('lng').textContent = lng.toFixed(5);
     document.getElementById('time').textContent = new Date().toLocaleTimeString();
     document.getElementById('updateCount').textContent = updates;
 }
 async function pollLocation() {
     if (!active) return;
     try {
-        var url = SUPA_URL + '/rest/v1/locations?sos_id=eq.' + sosId + '&order=id.desc&limit=1';
-        var r = await fetch(url, { headers: HEADERS_READ });
-        if (r.ok) {
-            var data = await r.json();
-            if (data.length > 0) updateMap(data[0].lat, data[0].lng);
-        }
-    } catch (e) { console.error('Loc poll:', e); }
+        var r = await fetch(SUPA_URL + '/rest/v1/locations?sos_id=eq.' + sosId + '&order=id.desc&limit=1', { headers: HEADERS_READ });
+        if (r.ok) { var d = await r.json(); if (d.length > 0) updateMap(d[0].lat, d[0].lng); }
+    } catch (e) {}
     setTimeout(pollLocation, 5000);
 }
 
-// ══════════════════════════════════
-// CHAT POLLING
-// ══════════════════════════════════
+// ═══ CHAT POLLING ═══
 async function pollChat() {
     if (!active) return;
     try {
-        var url = SUPA_URL + '/rest/v1/sos_chats?sos_id=eq.' + sosId + '&id=gt.' + lastChatId + '&order=id.asc';
-        var r = await fetch(url, { headers: HEADERS_READ });
+        var r = await fetch(SUPA_URL + '/rest/v1/sos_chats?sos_id=eq.' + sosId + '&id=gt.' + lastChatId + '&order=id.asc', { headers: HEADERS_READ });
         if (r.ok) {
             var data = await r.json();
             data.forEach(function(row) {
@@ -316,17 +325,86 @@ async function pollChat() {
                 if (row.id > lastChatId) lastChatId = row.id;
             });
         }
-    } catch (e) { console.error('Chat poll:', e); }
+    } catch (e) {}
     setTimeout(pollChat, 3000);
 }
 
+function escapeHtml(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+// ═══ CUSTOM AUDIO PLAYER ═══
+function createAudioPlayer(src, sender) {
+    var id = 'audio_' + Date.now() + '_' + Math.random().toString(36).substr(2,4);
+    var html = '<div class="audio-player" id="' + id + '">' +
+        '<button class="audio-play-btn" onclick="toggleAudio(\'' + id + '\')">▶</button>' +
+        '<div class="audio-mid">' +
+            '<div class="audio-progress" onclick="seekAudio(event, \'' + id + '\')">' +
+                '<div class="audio-progress-bar"></div>' +
+            '</div>' +
+            '<div class="audio-time">00:00 / --:--</div>' +
+        '</div>' +
+        '<audio preload="metadata" src="' + src + '"></audio>' +
+    '</div>';
+    return html;
+}
+
+function toggleAudio(id) {
+    var container = document.getElementById(id);
+    if (!container) return;
+    var audio = container.querySelector('audio');
+    var btn = container.querySelector('.audio-play-btn');
+    var bar = container.querySelector('.audio-progress-bar');
+    var timeEl = container.querySelector('.audio-time');
+
+    if (audio.paused) {
+        // Pause all other audios first
+        document.querySelectorAll('.audio-player audio').forEach(function(a) {
+            if (a !== audio && !a.paused) {
+                a.pause();
+                a.closest('.audio-player').querySelector('.audio-play-btn').textContent = '▶';
+            }
+        });
+        audio.play();
+        btn.textContent = '⏸';
+
+        audio.ontimeupdate = function() {
+            var pct = (audio.currentTime / audio.duration) * 100;
+            bar.style.width = pct + '%';
+            timeEl.textContent = fmtTime(audio.currentTime) + ' / ' + fmtTime(audio.duration);
+        };
+        audio.onended = function() {
+            btn.textContent = '▶';
+            bar.style.width = '0%';
+        };
+    } else {
+        audio.pause();
+        btn.textContent = '▶';
+    }
+}
+
+function seekAudio(e, id) {
+    var container = document.getElementById(id);
+    var audio = container.querySelector('audio');
+    var progEl = container.querySelector('.audio-progress');
+    var rect = progEl.getBoundingClientRect();
+    var pct = (e.clientX - rect.left) / rect.width;
+    if (audio.duration) audio.currentTime = pct * audio.duration;
+}
+
+function fmtTime(s) {
+    if (!s || isNaN(s)) return '--:--';
+    var m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+}
+
+// ═══ APPEND CHAT ═══
 function appendChat(sender, type, content) {
     var box = document.getElementById('chatBox');
     var div = document.createElement('div');
     div.className = 'msg ' + sender;
     var label = sender === 'app' ? '📱 Victim' : '🖥️ You';
+
     if (type === 'audio') {
-        div.innerHTML = '<div class="label">' + label + '</div><audio controls src="' + content + '"></audio>';
+        div.innerHTML = '<div class="label">' + label + '</div>' + createAudioPlayer(content, sender);
     } else {
         div.innerHTML = '<div class="label">' + label + '</div>' + escapeHtml(content);
     }
@@ -334,19 +412,9 @@ function appendChat(sender, type, content) {
     box.scrollTop = box.scrollHeight;
 }
 
-function escapeHtml(t) {
-    var d = document.createElement('div');
-    d.textContent = t;
-    return d.innerHTML;
-}
-
-// ══════════════════════════════════
-// SEND TEXT
-// ══════════════════════════════════
+// ═══ SEND TEXT ═══
 document.getElementById('btnSendWeb').addEventListener('click', sendText);
-document.getElementById('chatInput').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') sendText();
-});
+document.getElementById('chatInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') sendText(); });
 
 async function sendText() {
     if (!active) return;
@@ -360,130 +428,88 @@ async function sendText() {
             method: 'POST', headers: HEADERS,
             body: JSON.stringify({ sos_id: sosId, sender_type: 'web', message_type: 'text', content: text })
         });
-    } catch (e) { console.error('Send:', e); }
+    } catch (e) {}
 }
 
-// ══════════════════════════════════
-// AUDIO — TOGGLE MODE (click start, click stop)
-// ══════════════════════════════════
-var mediaRecorder = null;
-var audioChunks = [];
-var isRecording = false;
-var recTimerInterval = null;
-var recSeconds = 0;
-
+// ═══ AUDIO RECORDING — TOGGLE ═══
+var mediaRecorder = null, audioChunks = [], isRecording = false, recTimerInterval = null, recSeconds = 0;
 var btnMic = document.getElementById('btnMicWeb');
 var recTimerEl = document.getElementById('recTimer');
 
 btnMic.addEventListener('click', function() {
-    if (isRecording) {
-        stopRecording();
-    } else {
-        startRecording();
-    }
+    if (isRecording) stopRecording(); else startRecording();
 });
 
 async function startRecording() {
     if (!active) return;
     try {
         var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        // Try webm first, fall back to default
         var options = {};
-        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-            options.mimeType = 'audio/webm;codecs=opus';
-        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-            options.mimeType = 'audio/webm';
+        if (typeof MediaRecorder !== 'undefined') {
+            if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                options.mimeType = 'audio/webm;codecs=opus';
+            } else if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm')) {
+                options.mimeType = 'audio/webm';
+            }
         }
-        // else let browser choose default
 
         mediaRecorder = new MediaRecorder(stream, options);
         audioChunks = [];
 
         mediaRecorder.ondataavailable = function(e) {
-            if (e.data && e.data.size > 0) {
-                audioChunks.push(e.data);
-            }
+            if (e.data && e.data.size > 0) audioChunks.push(e.data);
         };
 
         mediaRecorder.onstop = async function() {
-            // Stop all tracks
             stream.getTracks().forEach(function(t) { t.stop(); });
-
-            if (audioChunks.length === 0) {
-                appendChat('web', 'text', '⚠️ No audio recorded');
-                return;
-            }
+            if (audioChunks.length === 0) { appendChat('web', 'text', '⚠️ No audio'); return; }
 
             var mimeType = mediaRecorder.mimeType || 'audio/webm';
             var blob = new Blob(audioChunks, { type: mimeType });
-
-            if (blob.size < 100) {
-                appendChat('web', 'text', '⚠️ Recording too short');
-                return;
-            }
+            if (blob.size < 100) { appendChat('web', 'text', '⚠️ Too short'); return; }
 
             var ext = mimeType.includes('webm') ? 'webm' : 'ogg';
             var fileName = sosId + '_web_' + Date.now() + '.' + ext;
 
-            appendChat('web', 'text', '🔄 Uploading voice note...');
+            appendChat('web', 'text', '🔄 Uploading...');
 
             try {
-                var uploadResp = await fetch(SUPA_URL + '/storage/v1/object/sos-recordings/' + fileName, {
+                var resp = await fetch(SUPA_URL + '/storage/v1/object/sos-recordings/' + fileName, {
                     method: 'POST',
-                    headers: {
-                        'apikey': SUPA_KEY,
-                        'Authorization': 'Bearer ' + SUPA_KEY,
-                        'Content-Type': mimeType
-                    },
+                    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': mimeType },
                     body: blob
                 });
-
-                if (uploadResp.ok) {
-                    var publicUrl = SUPA_URL + '/storage/v1/object/public/sos-recordings/' + fileName;
-                    appendChat('web', 'audio', publicUrl);
+                if (resp.ok) {
+                    var url = SUPA_URL + '/storage/v1/object/public/sos-recordings/' + fileName;
+                    appendChat('web', 'audio', url);
                     await fetch(SUPA_URL + '/rest/v1/sos_chats', {
                         method: 'POST', headers: HEADERS,
-                        body: JSON.stringify({ sos_id: sosId, sender_type: 'web', message_type: 'audio', content: publicUrl })
+                        body: JSON.stringify({ sos_id: sosId, sender_type: 'web', message_type: 'audio', content: url })
                     });
                 } else {
-                    var errText = await uploadResp.text();
-                    console.error('Upload failed:', uploadResp.status, errText);
-                    appendChat('web', 'text', '❌ Upload failed (' + uploadResp.status + ')');
+                    appendChat('web', 'text', '❌ Upload failed (' + resp.status + ')');
                 }
-            } catch (e) {
-                console.error('Upload error:', e);
-                appendChat('web', 'text', '❌ Upload error');
-            }
+            } catch (e) { appendChat('web', 'text', '❌ Upload error'); }
         };
 
-        // Request data every 250ms so chunks are captured
         mediaRecorder.start(250);
         isRecording = true;
-
-        // UI feedback
         btnMic.classList.add('recording');
-        btnMic.textContent = '⏹️';
+        btnMic.textContent = '⏹';
         recSeconds = 0;
         recTimerEl.textContent = '00:00';
         recTimerEl.classList.add('active');
         recTimerInterval = setInterval(function() {
             recSeconds++;
-            var m = Math.floor(recSeconds / 60);
-            var s = recSeconds % 60;
-            recTimerEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+            recTimerEl.textContent = String(Math.floor(recSeconds/60)).padStart(2,'0') + ':' + String(recSeconds%60).padStart(2,'0');
         }, 1000);
-
     } catch (e) {
-        console.error('Mic error:', e);
-        alert('Microphone access denied or not available.');
+        alert('Mic not available');
     }
 }
 
 function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-    }
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
     isRecording = false;
     btnMic.classList.remove('recording');
     btnMic.textContent = '🎤';
@@ -491,7 +517,6 @@ function stopRecording() {
     recTimerEl.classList.remove('active');
 }
 
-// Map resize handler
 window.addEventListener('resize', function() {
     if (map) setTimeout(function() { map.invalidateSize(); }, 200);
 });
