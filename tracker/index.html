@@ -2,93 +2,230 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>🆘 SOS Emergency Dashboard</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; background: #0a0a1a; color: #fff; height: 100vh; overflow: hidden; }
+        /* ══════════════════════════════════════
+           RESET + BASE
+           ══════════════════════════════════════ */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0a0a1a; color: #fff;
+            height: 100%; width: 100%;
+            overflow: hidden;
+        }
 
-        .dashboard { display: flex; height: 100vh; }
+        /* ══════════════════════════════════════
+           DASHBOARD GRID — 2-column on desktop
+           ══════════════════════════════════════ */
+        .dashboard {
+            display: flex;
+            width: 100%; height: 100vh;
+        }
 
-        /* LEFT — Map */
-        .map-pane { flex: 1; position: relative; }
-        #map { width: 100%; height: 100%; }
+        /* ── LEFT: Map Pane ── */
+        .map-pane {
+            flex: 1;
+            min-width: 0;           /* prevent flex overflow */
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        #map {
+            flex: 1;
+            width: 100%;
+            min-height: 0;          /* let flex shrink */
+        }
+
+        /* Map Header Overlay */
         .map-header {
             position: absolute; top: 0; left: 0; right: 0; z-index: 999;
-            background: linear-gradient(135deg, rgba(26,26,46,0.95), rgba(22,33,62,0.95));
-            padding: 12px 20px; display: flex; align-items: center; gap: 12px;
+            background: linear-gradient(135deg, rgba(26,26,46,.95), rgba(22,33,62,.95));
+            padding: clamp(8px, 1.5vw, 14px) clamp(12px, 2vw, 20px);
+            display: flex; align-items: center; gap: clamp(8px, 1vw, 14px);
             border-bottom: 2px solid #ff1744;
         }
-        .pulse { width: 12px; height: 12px; border-radius: 50%; background: #ff1744; animation: pulse 1.5s infinite; }
+        .pulse {
+            width: 12px; height: 12px; border-radius: 50%;
+            background: #ff1744; flex-shrink: 0;
+            animation: pulse-ring 1.5s infinite;
+        }
         .pulse.off { background: #555; animation: none; }
-        @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,23,68,.7)} 50%{box-shadow:0 0 0 10px rgba(255,23,68,0)} }
-        .map-header h1 { font-size: 16px; }
-        .map-header .meta { font-size: 12px; color: #ff9800; }
+        @keyframes pulse-ring {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255,23,68,.7); }
+            50%      { box-shadow: 0 0 0 10px rgba(255,23,68,0); }
+        }
+        .map-header h1 { font-size: clamp(13px, 1.8vw, 17px); white-space: nowrap; }
+        .map-header .meta { font-size: clamp(10px, 1.2vw, 13px); color: #ff9800; }
         .timer-badge {
-            margin-left: auto; background: #ff1744; padding: 4px 12px; border-radius: 14px;
-            font-weight: 700; font-family: monospace; font-size: 14px;
+            margin-left: auto; flex-shrink: 0;
+            background: #ff1744; padding: 4px 12px; border-radius: 14px;
+            font-weight: 700; font-family: monospace;
+            font-size: clamp(12px, 1.4vw, 15px);
         }
         .timer-badge.off { background: #555; }
+
+        /* Map Info Footer */
         .map-info {
             position: absolute; bottom: 0; left: 0; right: 0; z-index: 999;
-            background: rgba(26,26,46,0.9); padding: 8px 16px; font-size: 12px; color: #b0bec5;
-            display: flex; gap: 20px;
+            background: rgba(26,26,46,.9);
+            padding: 6px clamp(10px, 2vw, 16px);
+            font-size: clamp(10px, 1.1vw, 12px); color: #b0bec5;
+            display: flex; flex-wrap: wrap; gap: clamp(8px, 2vw, 20px);
         }
         .map-info span { color: #64ffda; font-weight: 600; }
 
-        /* RIGHT — Chat */
+        /* ── RIGHT: Chat Pane ── */
         .chat-pane {
-            width: 380px; display: flex; flex-direction: column;
-            background: #0f0f23; border-left: 1px solid #1e1e3a;
+            width: clamp(280px, 28vw, 400px);
+            flex-shrink: 0;
+            display: flex; flex-direction: column;
+            background: #0f0f23;
+            border-left: 1px solid #1e1e3a;
         }
+
+        /* Chat Header */
         .chat-header {
-            padding: 14px 16px; background: #1a1a2e;
-            border-bottom: 1px solid #2a2a4a; font-size: 15px; font-weight: 700; color: #b388ff;
+            padding: 12px 16px;
+            background: #1a1a2e;
+            border-bottom: 1px solid #2a2a4a;
+            font-size: 15px; font-weight: 700; color: #b388ff;
+            flex-shrink: 0;
         }
-        .chat-messages {
-            flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+
+        /* Status Bar */
+        .status-bar {
+            padding: 5px 16px;
+            background: #1a1a2e;
+            text-align: center;
+            font-size: 11px; color: #4caf50;
+            border-bottom: 1px solid #2a2a4a;
+            flex-shrink: 0;
         }
-        .msg { max-width: 85%; padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 1.4; word-break: break-word; }
-        .msg.app { align-self: flex-start; background: #1e3a5f; color: #bbdefb; border-bottom-left-radius: 4px; }
-        .msg.web { align-self: flex-end; background: #3f51b5; color: #fff; border-bottom-right-radius: 4px; }
-        .msg .label { font-size: 10px; color: #888; margin-bottom: 4px; }
-        .msg audio { width: 100%; margin-top: 6px; }
-        .status-bar { padding: 6px 16px; background: #1a1a2e; text-align: center; font-size: 11px; color: #4caf50; border-bottom: 1px solid #2a2a4a; }
         .status-bar.err { color: #ff5252; }
 
+        /* Chat Messages */
+        .chat-messages {
+            flex: 1;
+            min-height: 0;           /* critical for flex scroll */
+            overflow-y: auto;
+            padding: 10px 12px;
+            display: flex; flex-direction: column; gap: 8px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Message Bubbles */
+        .msg {
+            max-width: 85%; padding: 10px 14px; border-radius: 14px;
+            font-size: 13px; line-height: 1.5;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            hyphens: auto;
+        }
+        .msg.app {
+            align-self: flex-start;
+            background: #1e3a5f; color: #bbdefb;
+            border-bottom-left-radius: 4px;
+        }
+        .msg.web {
+            align-self: flex-end;
+            background: #3f51b5; color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+        .msg .label { font-size: 10px; color: #888; margin-bottom: 3px; }
+        .msg audio { width: 100%; margin-top: 6px; max-width: 260px; }
+
+        /* Expired Banner */
+        .expired-bar {
+            text-align: center; padding: 10px;
+            background: #333; color: #ff9800;
+            font-size: 13px; display: none;
+            flex-shrink: 0;
+        }
+
+        /* Chat Input Bar */
         .chat-input {
-            padding: 10px; background: #1a1a2e; border-top: 1px solid #2a2a4a;
+            padding: 8px 10px;
+            background: #1a1a2e;
+            border-top: 1px solid #2a2a4a;
             display: flex; gap: 6px; align-items: center;
+            flex-shrink: 0;
         }
         .chat-input input {
-            flex: 1; background: #12122a; border: 1px solid #2a2a4a; border-radius: 10px;
+            flex: 1; min-width: 0;
+            background: #12122a; border: 1px solid #2a2a4a; border-radius: 10px;
             padding: 10px 14px; color: #e0e0ff; font-size: 13px; outline: none;
         }
+        .chat-input input:focus { border-color: #3f51b5; }
         .chat-input input::placeholder { color: #555; }
         .chat-input button {
-            width: 40px; height: 40px; border: none; border-radius: 10px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center; font-size: 18px;
+            width: 40px; height: 40px; flex-shrink: 0;
+            border: none; border-radius: 10px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; transition: transform .1s, background .2s;
         }
+        .chat-input button:active { transform: scale(.9); }
         .btn-send { background: #3f51b5; color: #fff; }
-        .btn-mic { background: #7c4dff; color: #fff; }
-        .btn-mic.recording { background: #ff1744; animation: pulse 1s infinite; }
+        .btn-mic  { background: #7c4dff; color: #fff; }
+        .btn-mic.recording { background: #ff1744; animation: pulse-ring 1s infinite; }
 
-        .expired-bar {
-            text-align: center; padding: 12px; background: #333; color: #ff9800;
-            font-size: 14px; display: none;
-        }
-
+        /* ══════════════════════════════════════
+           RESPONSIVE — Mobile (≤768px)
+           Stacks to single column
+           ══════════════════════════════════════ */
         @media (max-width: 768px) {
-            .dashboard { flex-direction: column; }
-            .map-pane { height: 50vh; }
-            .chat-pane { width: 100%; height: 50vh; }
+            .dashboard {
+                flex-direction: column;
+            }
+            .map-pane {
+                flex: none;
+                height: 50vh;
+                width: 100%;
+            }
+            .chat-pane {
+                width: 100%;
+                flex: 1;            /* fills remaining 50vh */
+                border-left: none;
+                border-top: 1px solid #1e1e3a;
+            }
+            .map-header h1 { font-size: 14px; }
+            .map-info { font-size: 10px; gap: 8px; }
+            .msg { max-width: 90%; }
         }
+
+        /* ══════════════════════════════════════
+           RESPONSIVE — Small phones (≤480px)
+           ══════════════════════════════════════ */
+        @media (max-width: 480px) {
+            .map-pane { height: 45vh; }
+            .chat-header { padding: 10px 12px; font-size: 14px; }
+            .chat-input input { padding: 8px 10px; font-size: 12px; }
+            .chat-input button { width: 36px; height: 36px; font-size: 16px; }
+            .msg { font-size: 12px; padding: 8px 12px; }
+            .timer-badge { padding: 3px 8px; font-size: 12px; }
+        }
+
+        /* ══════════════════════════════════════
+           LANDSCAPE phones
+           ══════════════════════════════════════ */
+        @media (max-height: 500px) and (orientation: landscape) {
+            .dashboard { flex-direction: row; }
+            .map-pane { flex: 1; height: 100vh; }
+            .chat-pane { width: 40vw; height: 100vh; }
+        }
+
+        /* Scrollbar styling */
+        .chat-messages::-webkit-scrollbar { width: 4px; }
+        .chat-messages::-webkit-scrollbar-track { background: transparent; }
+        .chat-messages::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
     </style>
 </head>
 <body>
 <div class="dashboard">
-    <!-- LEFT: Map -->
+    <!-- ═══ LEFT: Map ═══ -->
     <div class="map-pane">
         <div class="map-header">
             <div class="pulse" id="pulseIcon"></div>
@@ -107,16 +244,16 @@
         </div>
     </div>
 
-    <!-- RIGHT: Chat -->
+    <!-- ═══ RIGHT: Chat ═══ -->
     <div class="chat-pane">
         <div class="chat-header">💬 Emergency Chat</div>
         <div class="status-bar" id="statusBar">🔄 Connecting to Supabase...</div>
         <div class="chat-messages" id="chatBox"></div>
         <div class="expired-bar" id="expiredBanner">⏰ Session expired</div>
         <div class="chat-input" id="chatInputBar">
-            <input type="text" id="chatInput" placeholder="Type a message..." />
-            <button class="btn-mic" id="btnMicWeb" title="Hold to record">🎤</button>
-            <button class="btn-send" id="btnSendWeb" title="Send">➤</button>
+            <input type="text" id="chatInput" placeholder="Type a message..." autocomplete="off" />
+            <button class="btn-mic" id="btnMicWeb" title="Hold to record audio">🎤</button>
+            <button class="btn-send" id="btnSendWeb" title="Send message">➤</button>
         </div>
     </div>
 </div>
@@ -124,7 +261,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ══════════════════════════════════
-// CONFIG — Direct REST (no SDK needed)
+// CONFIG — Direct REST (no SDK)
 // ══════════════════════════════════
 const SUPA_URL = 'https://gyjdbqmdoofkywmnxhyc.supabase.co';
 const SUPA_KEY = 'sb_publishable_qRe0N5vaN1_Ziqte5oLBEw_QT4NZHLA';
@@ -183,7 +320,7 @@ async function testConnection() {
 // ══════════════════════════════════
 function startCountdown() {
     updateTimerUI();
-    const iv = setInterval(() => {
+    const iv = setInterval(function() {
         remaining--;
         updateTimerUI();
         if (remaining <= 0) { clearInterval(iv); stopSession(); }
@@ -191,7 +328,8 @@ function startCountdown() {
 }
 function updateTimerUI() {
     const m = Math.floor(remaining / 60), s = remaining % 60;
-    document.getElementById('countdown').textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    document.getElementById('countdown').textContent =
+        String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
 }
 function stopSession() {
     active = false;
@@ -248,7 +386,7 @@ async function pollChat() {
         const r = await fetch(url, { headers: HEADERS_READ });
         if (r.ok) {
             const data = await r.json();
-            data.forEach(row => {
+            data.forEach(function(row) {
                 appendChat(row.sender_type, row.message_type, row.content);
                 if (row.id > lastChatId) lastChatId = row.id;
             });
@@ -258,10 +396,10 @@ async function pollChat() {
 }
 
 function appendChat(sender, type, content) {
-    const box = document.getElementById('chatBox');
-    const div = document.createElement('div');
+    var box = document.getElementById('chatBox');
+    var div = document.createElement('div');
     div.className = 'msg ' + sender;
-    const label = sender === 'app' ? '📱 Victim' : '🖥️ You';
+    var label = sender === 'app' ? '📱 Victim' : '🖥️ You';
     if (type === 'audio') {
         div.innerHTML = '<div class="label">' + label + '</div><audio controls src="' + content + '"></audio>';
     } else {
@@ -272,13 +410,13 @@ function appendChat(sender, type, content) {
 }
 
 function escapeHtml(text) {
-    const d = document.createElement('div');
+    var d = document.createElement('div');
     d.textContent = text;
     return d.innerHTML;
 }
 
 // ══════════════════════════════════
-// CHAT — Send Text (Web -> App)
+// CHAT — Send Text (Web → App)
 // ══════════════════════════════════
 document.getElementById('btnSendWeb').addEventListener('click', sendTextFromWeb);
 document.getElementById('chatInput').addEventListener('keydown', function(e) {
@@ -287,8 +425,8 @@ document.getElementById('chatInput').addEventListener('keydown', function(e) {
 
 async function sendTextFromWeb() {
     if (!active) return;
-    const input = document.getElementById('chatInput');
-    const text = input.value.trim();
+    var input = document.getElementById('chatInput');
+    var text = input.value.trim();
     if (!text) return;
     input.value = '';
     appendChat('web', 'text', text);
@@ -307,8 +445,8 @@ async function sendTextFromWeb() {
 // ══════════════════════════════════
 // CHAT — Audio Recording (Web)
 // ══════════════════════════════════
-let mediaRecorder, audioChunks = [];
-const btnMic = document.getElementById('btnMicWeb');
+var mediaRecorder, audioChunks = [];
+var btnMic = document.getElementById('btnMicWeb');
 
 btnMic.addEventListener('mousedown', startWebRecording);
 btnMic.addEventListener('mouseup', stopWebRecording);
@@ -318,18 +456,17 @@ btnMic.addEventListener('touchend', function(e) { e.preventDefault(); stopWebRec
 async function startWebRecording() {
     if (!active) return;
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         audioChunks = [];
         mediaRecorder.ondataavailable = function(e) { audioChunks.push(e.data); };
         mediaRecorder.onstop = async function() {
             stream.getTracks().forEach(function(t) { t.stop(); });
-            const blob = new Blob(audioChunks, { type: 'audio/webm' });
-            const fileName = sosId + '_web_' + Date.now() + '.webm';
+            var blob = new Blob(audioChunks, { type: 'audio/webm' });
+            var fileName = sosId + '_web_' + Date.now() + '.webm';
 
-            // Upload to Supabase Storage via REST
             try {
-                const uploadResp = await fetch(SUPA_URL + '/storage/v1/object/sos-recordings/' + fileName, {
+                var uploadResp = await fetch(SUPA_URL + '/storage/v1/object/sos-recordings/' + fileName, {
                     method: 'POST',
                     headers: {
                         'apikey': SUPA_KEY,
@@ -339,7 +476,7 @@ async function startWebRecording() {
                     body: blob
                 });
                 if (uploadResp.ok) {
-                    const publicUrl = SUPA_URL + '/storage/v1/object/public/sos-recordings/' + fileName;
+                    var publicUrl = SUPA_URL + '/storage/v1/object/public/sos-recordings/' + fileName;
                     appendChat('web', 'audio', publicUrl);
                     await fetch(SUPA_URL + '/rest/v1/sos_chats', {
                         method: 'POST',
@@ -350,8 +487,12 @@ async function startWebRecording() {
                     });
                 } else {
                     console.error('Upload failed:', uploadResp.status);
+                    appendChat('web', 'text', '⚠️ Audio upload failed (' + uploadResp.status + ')');
                 }
-            } catch (e) { console.error('Audio upload error:', e); }
+            } catch (e) {
+                console.error('Audio upload error:', e);
+                appendChat('web', 'text', '⚠️ Upload error: ' + e.message);
+            }
         };
         mediaRecorder.start();
         btnMic.classList.add('recording');
@@ -369,6 +510,11 @@ function stopWebRecording() {
         btnMic.textContent = '🎤';
     }
 }
+
+// Handle map resize on window resize
+window.addEventListener('resize', function() {
+    if (map) setTimeout(function() { map.invalidateSize(); }, 200);
+});
 </script>
 </body>
 </html>
