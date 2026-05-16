@@ -4,9 +4,12 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#1A1A2E">
+    android:background="#1A1A2E"
+    android:fitsSystemWindows="true">
 
-    <!-- OSMDroid Map -->
+    <!-- ════════════════════════════════════════ -->
+    <!-- LAYER 0: Full-Bleed Map                 -->
+    <!-- ════════════════════════════════════════ -->
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
         android:layout_width="0dp"
@@ -16,12 +19,16 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Search Panel (top) -->
+    <!-- ════════════════════════════════════════ -->
+    <!-- LAYER 1: Search Panel (top overlay)     -->
+    <!-- ════════════════════════════════════════ -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/searchPanel"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_margin="12dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginTop="12dp"
         app:cardCornerRadius="16dp"
         app:cardElevation="8dp"
         app:cardBackgroundColor="#E6161625"
@@ -111,7 +118,9 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Loading Indicator -->
+    <!-- ════════════════════════════════════════ -->
+    <!-- LAYER 2: Loading Indicator (center)     -->
+    <!-- ════════════════════════════════════════ -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/loadingCard"
         android:layout_width="wrap_content"
@@ -147,7 +156,9 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Bottom Route Info Card -->
+    <!-- ════════════════════════════════════════ -->
+    <!-- LAYER 3: Bottom Route Info Card         -->
+    <!-- ════════════════════════════════════════ -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/bottomPanel"
         android:layout_width="0dp"
@@ -260,48 +271,55 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- SOS Emergency FAB -->
+    <!-- ════════════════════════════════════════ -->
+    <!-- LAYER 4: Right-Side FAB Chain           -->
+    <!--   SOS → MyLocation (vertical packed)    -->
+    <!-- ════════════════════════════════════════ -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabSos"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="8dp"
         android:src="@android:drawable/ic_dialog_alert"
         android:contentDescription="SOS Emergency"
         app:backgroundTint="#FF0000"
         app:tint="#FFFFFF"
         app:fabSize="normal"
         app:layout_constraintBottom_toTopOf="@+id/fabMyLocation"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginBottom="8dp" />
+        app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- My Location FAB -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabMyLocation"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
         android:src="@android:drawable/ic_menu_mylocation"
         android:contentDescription="My Location"
         app:backgroundTint="#3F51B5"
         app:tint="#FFFFFF"
         app:fabSize="mini"
         app:layout_constraintBottom_toTopOf="@+id/bottomPanel"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginBottom="8dp" />
-    <!-- SOS Active Banner (hidden by default, shown when tracking) -->
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- LAYER 5: SOS Active Banner              -->
+    <!-- ════════════════════════════════════════ -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/sosActiveCard"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_margin="12dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="8dp"
         android:visibility="gone"
         app:cardCornerRadius="16dp"
         app:cardElevation="12dp"
         app:cardBackgroundColor="#E6B71C1C"
-        app:layout_constraintBottom_toTopOf="@+id/bottomPanel"
+        app:layout_constraintBottom_toTopOf="@+id/fabMyLocation"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintEnd_toStartOf="@+id/fabSos">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -341,30 +359,52 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- AI Chat FAB (bottom-left) -->
+    <!-- ════════════════════════════════════════ -->
+    <!-- LAYER 6: AI Chat FAB (bottom-left)      -->
+    <!-- ════════════════════════════════════════ -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabChat"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="16dp"
         android:src="@android:drawable/ic_btn_speak_now"
         android:contentDescription="AI Chat"
         app:backgroundTint="#7C4DFF"
         app:tint="#FFFFFF"
         app:fabSize="normal"
-        app:layout_constraintBottom_toTopOf="@+id/bottomPanel"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginBottom="8dp" />
+        app:layout_constraintBottom_toTopOf="@+id/chatSheet"
+        app:layout_constraintStart_toStartOf="parent" />
 
-    <!-- Chat Bottom Sheet -->
+    <!-- ════════════════════════════════════════ -->
+    <!-- LAYER 7: Chat Bottom Sheet              -->
+    <!-- Uses percentage height (45%) so it      -->
+    <!-- adapts to all screen aspect ratios.     -->
+    <!-- Internal layout uses weight-based flex  -->
+    <!-- so input bar always stays visible when  -->
+    <!-- keyboard appears (adjustResize).        -->
+    <!-- ════════════════════════════════════════ -->
+
+    <!-- Guideline at 55% from top = chat takes bottom 45% -->
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guidelineChatTop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintGuide_percent="0.55" />
+
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/chatSheet"
         android:layout_width="0dp"
-        android:layout_height="350dp"
+        android:layout_height="0dp"
         android:visibility="gone"
         app:cardCornerRadius="24dp"
         app:cardElevation="16dp"
-        app:cardBackgroundColor="#E6101028"
+        app:cardBackgroundColor="#F0101028"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginBottom="4dp"
+        app:layout_constraintTop_toTopOf="@+id/guidelineChatTop"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -374,20 +414,21 @@
             android:layout_height="match_parent"
             android:orientation="vertical">
 
-            <!-- Chat Header -->
+            <!-- Chat Header (fixed) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:padding="12dp"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="10dp"
                 android:background="#1A1A2E">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="🤖 AI Navigator"
+                    android:text="💬 SOS Chat"
                     android:textColor="#B388FF"
                     android:textSize="15sp"
                     android:textStyle="bold" />
@@ -401,22 +442,24 @@
                     android:contentDescription="Close chat" />
             </LinearLayout>
 
-            <!-- Chat Messages -->
+            <!-- Chat Messages (fills remaining space, scrolls) -->
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/rvChatMessages"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
                 android:padding="8dp"
-                android:clipToPadding="false" />
+                android:clipToPadding="false"
+                android:overScrollMode="never" />
 
-            <!-- Input Bar -->
+            <!-- Input Bar (fixed at bottom, never overlapped by keyboard) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:padding="8dp"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="6dp"
                 android:background="#1A1A2E">
 
                 <EditText
